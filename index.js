@@ -4,10 +4,11 @@ const app = express();
 app.use(express.json());
 
 // Conectar a MongoDB
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://AndyZuniga:Aatrox2887@cluster0.p07nln0.mongodb.net/MyAppServe?retryWrites=true&w=majority';
+require('dotenv').config();
+const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ Conectado a MongoDB Atlas'))
-  .catch(err => console.error('❌ Error al conectar a MongoDB', err));
+  .then(() => console.log('Conectado a MongoDB Atlas'))
+  .catch(err => console.error('Error al conectar a MongoDB', err));
 
 // Definir el esquema de usuario
 const userSchema = new mongoose.Schema({
