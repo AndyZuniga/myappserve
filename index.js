@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema({
 });
 
 // Crear el modelo de usuario
-const Usuario = mongoose.model('users', usersSchema); // Colección 'users' en 'MyAppServe'
+const Usuario = mongoose.model('user', userSchema); // Colección 'user' en 'MyAppServe'
 
 // Ruta para registrar un usuario
 app.post('/register', async (req, res) => {
