@@ -79,19 +79,17 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/login', async (req, res) => {
-  const { correo: correoOapodo, password } = req.body;
+  const { correo, password } = req.body;
 
-  if (!correoOapodo || !password) {
-    return res.status(400).json({ error: 'Correo o apodo y contraseña son obligatorios' });
+  if (!correo || !password) {
+    return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
   }
 
   try {
-    const usuario = await Usuario.findOne({
-      $or: [{ correo: correoOapodo }, { apodo: correoOapodo }]
-    });
+    const usuario = await Usuario.findOne({ correo });
 
     if (!usuario) {
-      return res.status(400).json({ error: 'Correo o apodo no registrados' });
+      return res.status(400).json({ error: 'Correo no registrado' });
     }
 
     const passwordValido = await bcrypt.compare(password, usuario.password);
@@ -110,6 +108,8 @@ app.post('/login', async (req, res) => {
     res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
   }
 });
+
+
 
 //Esta ruta solo será accesible si el token es válido:
 app.get('/perfil', verificarToken, async (req, res) => {
