@@ -1,11 +1,13 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const app = express();
 app.use(express.json());
 
 // Conectar a MongoDB
 require('dotenv').config();
+const JWT_SECRET = process.env.JWT_SECRET;
 const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Conectado a MongoDB Atlas'))
@@ -18,6 +20,26 @@ const userSchema = new mongoose.Schema({
   correo: { type: String, unique: true, required: true },
   password: { type: String, required: true }
 });
+// Middleware verificarToken 
+function verificarToken(req, res, next) {
+  const authHeader = req.header('Authorization');
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Acceso denegado. Token no proporcionado.' });
+  }
+
+  const token = authHeader.startsWith('Bearer ')
+    ? authHeader.split(' ')[1]
+    : authHeader;
+
+  try {
+    const verificado = jwt.verify(token, JWT_SECRET);
+    req.usuario = verificado;
+    next();
+  } catch (err) {
+    res.status(400).json({ error: 'Token inválido' });
+  }
+}
 
 // Crear el modelo de usuario
 const Usuario = mongoose.model('user', userSchema); // Colección 'user' en 'MyAppServe'
@@ -43,7 +65,7 @@ app.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'El correo ya está registrado' });
     }
 
-    
+
     // Hashear la contraseña
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -58,16 +80,19 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/login', async (req, res) => {
-  const { correo, password } = req.body;
+  const { correo: correoOapodo, password } = req.body;
 
-  if (!correo || !password) {
-    return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
+  if (!correoOapodo || !password) {
+    return res.status(400).json({ error: 'Correo o apodo y contraseña son obligatorios' });
   }
 
   try {
-    const usuario = await Usuario.findOne({ correo });
+    const usuario = await Usuario.findOne({
+      $or: [{ correo: correoOapodo }, { apodo: correoOapodo }]
+    });
+
     if (!usuario) {
-      return res.status(400).json({ error: 'Correo no registrado' });
+      return res.status(400).json({ error: 'Correo o apodo no registrados' });
     }
 
     const passwordValido = await bcrypt.compare(password, usuario.password);
@@ -75,11 +100,33 @@ app.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
 
-    res.json({ message: 'Inicio de sesión exitoso', usuario: { apodo: usuario.apodo, correo: usuario.correo } });
+    const token = jwt.sign(
+      { id: usuario._id, apodo: usuario.apodo },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.json({ message: 'Inicio de sesión exitoso', token });
   } catch (err) {
     res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
   }
 });
+
+//Esta ruta solo será accesible si el token es válido:
+app.get('/perfil', verificarToken, async (req, res) => {
+  try {
+    const usuario = await Usuario.findById(req.usuario.id).select('-password'); // sin contraseña
+    if (!usuario) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    res.json({ perfil: usuario });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener el perfil', detalles: err.message });
+  }
+});
+
+
 
 
 
