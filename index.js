@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const app = express();
 app.use(express.json());
-
 // Conectar a MongoDB
 require('dotenv').config();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -141,7 +140,7 @@ app.get('/usuarios', async (req, res) => {
 });
 
 // Configurar el puerto
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
