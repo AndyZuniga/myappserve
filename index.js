@@ -7,6 +7,12 @@ app.use(express.json());
 // Conectar a MongoDB
 require('dotenv').config();
 const JWT_SECRET = process.env.JWT_SECRET;
+const token = jwt.sign(
+  { id: usuario._id, apodo: usuario.apodo },
+  JWT_SECRET,
+  { expiresIn: '1h' }
+);
+
 const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Conectado a MongoDB Atlas'))
@@ -19,27 +25,6 @@ const userSchema = new mongoose.Schema({
   correo: { type: String, unique: true, required: true },
   password: { type: String, required: true }
 });
-// Middleware verificarToken 
-function verificarToken(req, res, next) {
-  const authHeader = req.header('Authorization');
-
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Acceso denegado. Token no proporcionado.' });
-  }
-
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.split(' ')[1]
-    : authHeader;
-
-  try {
-    const verificado = jwt.verify(token, JWT_SECRET);
-    req.usuario = verificado;
-    next();
-  } catch (err) {
-    res.status(400).json({ error: 'Token inválido' });
-  }
-}
-
 // Crear el modelo de usuario
 const Usuario = mongoose.model('user', userSchema); // Colección 'user' en 'MyAppServe'
 
