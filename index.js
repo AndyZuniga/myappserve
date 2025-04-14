@@ -1,5 +1,5 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const app = express();
@@ -66,8 +66,8 @@ app.post('/register', async (req, res) => {
 
 
     // Hashear la contraseña
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const salt = await bcryptjs.genSalt(10);
+    const hashedPassword = await bcryptjs.hash(password, salt);
     // Crear nuevo usuario con la contraseña protegida
     const nuevoUsuario = new Usuario({ nombre, apellido, apodo, correo, password: hashedPassword });
     await nuevoUsuario.save();
@@ -92,7 +92,7 @@ app.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Correo no registrado' });
     }
 
-    const passwordValido = await bcrypt.compare(password, usuario.password);
+    const passwordValido = await bcryptjs.compare(password, usuario.password);
     if (!passwordValido) {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
