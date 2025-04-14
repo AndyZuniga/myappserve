@@ -109,26 +109,6 @@ app.post('/login', async (req, res) => {
   }
 });
 
-
-
-//Esta ruta solo será accesible si el token es válido:
-app.get('/perfil', verificarToken, async (req, res) => {
-  try {
-    const usuario = await Usuario.findById(req.usuario.id).select('-password'); // sin contraseña
-    if (!usuario) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-
-    res.json({ perfil: usuario });
-  } catch (err) {
-    res.status(500).json({ error: 'Error al obtener el perfil', detalles: err.message });
-  }
-});
-
-
-
-
-
 // Ruta para obtener todos los usuarios (opcional)
 app.get('/usuarios', async (req, res) => {
   try {
