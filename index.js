@@ -1,22 +1,17 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+require('dotenv').config();
+
 const app = express();
 app.use(express.json());
-// Conectar a MongoDB
-require('dotenv').config();
-const JWT_SECRET = process.env.JWT_SECRET;
-const token = jwt.sign(
-  { id: usuario._id, apodo: usuario.apodo },
-  JWT_SECRET,
-  { expiresIn: '1h' }
-);
 
+// Conectar a MongoDB
 const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('Conectado a MongoDB Atlas'))
-  .catch(err => console.error('Error al conectar a MongoDB', err));
+  .then(() => console.log('✅ Conectado a MongoDB Atlas'))
+  .catch(err => console.error('❌ Error al conectar a MongoDB:', err));
+
 // Definir el esquema de usuario
 const userSchema = new mongoose.Schema({
   nombre: { type: String, required: true },
@@ -25,19 +20,18 @@ const userSchema = new mongoose.Schema({
   correo: { type: String, unique: true, required: true },
   password: { type: String, required: true }
 });
-// Crear el modelo de usuario
-const Usuario = mongoose.model('user', userSchema); // Colección 'user' en 'MyAppServe'
 
-// Ruta para registrar un usuario
+// Crear el modelo de usuario
+const Usuario = mongoose.model('user', userSchema);
+
+// 👉 Ruta para registrar un usuario
 app.post('/register', async (req, res) => {
   const { nombre, apellido, apodo, correo, password } = req.body;
 
-  // Validación de campos obligatorios
   if (!nombre || !apellido || !apodo || !correo || !password) {
     return res.status(400).json({ error: 'Todos los campos son obligatorios' });
   }
 
-  // Validar que el apodo y correo no existan
   try {
     const apodoExistente = await Usuario.findOne({ apodo });
     if (apodoExistente) {
@@ -49,20 +43,19 @@ app.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'El correo ya está registrado' });
     }
 
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Hashear la contraseña
-    const salt = await bcryptjs.genSalt(10);
-    const hashedPassword = await bcryptjs.hash(password, salt);
-    // Crear nuevo usuario con la contraseña protegida
     const nuevoUsuario = new Usuario({ nombre, apellido, apodo, correo, password: hashedPassword });
     await nuevoUsuario.save();
-    // Respuesta de éxito
+
     res.json({ message: 'Usuario registrado correctamente' });
   } catch (err) {
-    res.status(500).json({ error: 'Error al registrar el usuario', detalles: err.message }); // aqui igual //me enmarca en rojo el nuevoUsuario
+    res.status(500).json({ error: 'Error al registrar el usuario', detalles: err.message });
   }
 });
 
+// 👉 Ruta de login sin token
 app.post('/login', async (req, res) => {
   const { correo, password } = req.body;
 
@@ -72,40 +65,54 @@ app.post('/login', async (req, res) => {
 
   try {
     const usuario = await Usuario.findOne({ correo });
-
     if (!usuario) {
       return res.status(400).json({ error: 'Correo no registrado' });
     }
 
-    const passwordValido = await bcryptjs.compare(password, usuario.password);
+    const passwordValido = await bcrypt.compare(password, usuario.password);
     if (!passwordValido) {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
 
-    const token = jwt.sign(
-      { id: usuario._id, apodo: usuario.apodo },
-      JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-
-    res.json({ message: 'Inicio de sesión exitoso', token });
+    // Devolvemos algunos datos útiles del usuario
+    res.json({
+      message: 'Inicio de sesión exitoso',
+      usuario: {
+        id: usuario._id,
+        apodo: usuario.apodo,
+        correo: usuario.correo,
+        nombre: usuario.nombre,
+        apellido: usuario.apellido
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
   }
 });
 
-// Ruta para obtener todos los usuarios (opcional)
+// 👉 Ruta para obtener todos los usuarios
 app.get('/usuarios', async (req, res) => {
   try {
-    const usuarios = await Usuario.find();
+    const usuarios = await Usuario.find().select('-password'); // sin contraseñas
     res.json(usuarios);
   } catch (err) {
     res.status(500).json({ error: 'Error al obtener usuarios', detalles: err.message });
   }
 });
 
-// Configurar el puerto
-const PORT = process.env.PORT;
+// ⚠️ Ruta 404
+app.use((req, res) => {
+  res.status(404).json({ error: `Ruta ${req.method} ${req.originalUrl} no encontrada` });
+});
+
+// 🛠 Middleware de errores
+app.use((err, req, res, next) => {
+  console.error('Error interno:', err.stack);
+  res.status(500).json({ error: 'Error interno del servidor', mensaje: err.message });
+});
+
+// 🟢 Iniciar el servidor
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
