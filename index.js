@@ -78,14 +78,15 @@ app.post('/register', async (req, res) => {
   }
 });
 
-app.post('/login', async (req, res) => {
-  const { correo, password } = req.body;
-
-  if (!correo || !password) {
-    return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
-  }
-
+// Ruta de login
+app.post('/login', async (req, res, next) => {
   try {
+    const { correo, password } = req.body;
+
+    if (!correo || !password) {
+      return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
+    }
+
     const usuario = await Usuario.findOne({ correo });
 
     if (!usuario) {
@@ -105,39 +106,50 @@ app.post('/login', async (req, res) => {
 
     res.json({ message: 'Inicio de sesión exitoso', token });
   } catch (err) {
-    res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
+    next(err); // Pasa error al middleware global
   }
 });
 
-
-
-//Esta ruta solo será accesible si el token es válido:
-app.get('/perfil', verificarToken, async (req, res) => {
+// Ruta protegida para perfil
+app.get('/perfil', verificarToken, async (req, res, next) => {
   try {
-    const usuario = await Usuario.findById(req.usuario.id).select('-password'); // sin contraseña
+    const usuario = await Usuario.findById(req.usuario.id).select('-password');
     if (!usuario) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
     res.json({ perfil: usuario });
   } catch (err) {
-    res.status(500).json({ error: 'Error al obtener el perfil', detalles: err.message });
+    next(err);
   }
 });
 
-
-
-
-
-// Ruta para obtener todos los usuarios (opcional)
-app.get('/usuarios', async (req, res) => {
+// Ruta para obtener todos los usuarios
+app.get('/usuarios', async (req, res, next) => {
   try {
     const usuarios = await Usuario.find();
     res.json(usuarios);
   } catch (err) {
-    res.status(500).json({ error: 'Error al obtener usuarios', detalles: err.message });
+    next(err);
   }
 });
+
+
+// ⚠️ Ruta 404 para cualquier método o URL no registrada
+app.use((req, res) => {
+  res.status(404).json({ error: `Ruta ${req.method} ${req.originalUrl} no encontrada` });
+});
+
+
+// 🛠 Middleware global de manejo de errores (último middleware siempre)
+app.use((err, req, res, next) => {
+  console.error('Error interno:', err.stack);
+  res.status(500).json({
+    error: 'Error interno del servidor',
+    mensaje: err.message,
+  });
+});
+
 
 // Configurar el puerto
 const PORT = process.env.PORT;
