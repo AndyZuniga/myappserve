@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema({
 const Usuario = mongoose.model('user', userSchema);
 
 // 👉 Ruta para registrar un usuario
+// 👉 Ruta para registrar un usuario
 app.post('/register', async (req, res) => {
   const { nombre, apellido, apodo, correo, password } = req.body;
 
@@ -49,11 +50,22 @@ app.post('/register', async (req, res) => {
     const nuevoUsuario = new Usuario({ nombre, apellido, apodo, correo, password: hashedPassword });
     await nuevoUsuario.save();
 
-    res.json({ message: 'Usuario registrado correctamente' });
+    res.status(201).json({
+      message: 'Usuario registrado correctamente',
+      usuario: {
+        id: nuevoUsuario._id,
+        nombre: nuevoUsuario.nombre,
+        apellido: nuevoUsuario.apellido,
+        apodo: nuevoUsuario.apodo,
+        correo: nuevoUsuario.correo
+      }
+    });
+
   } catch (err) {
     res.status(500).json({ error: 'Error al registrar el usuario', detalles: err.message });
   }
 });
+
 
 // 👉 Ruta de login sin token
 app.post('/login', async (req, res) => {
