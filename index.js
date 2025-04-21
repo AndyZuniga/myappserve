@@ -23,38 +23,50 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Función para enviar correo de verificación
-const sendVerificationEmail = async (correo, token) => {
-  const verificationLink = `http://localhost:3000/verify/${token}`; // Cambia si usas dominio real
+// Función para enviar enlace de verificación
+const sendVerificationLink = async (correo, token) => {
+  const link = `setmatch://verificar?token=${token}`;
   const mailOptions = {
     from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
     to: correo,
-    subject: 'Verifica tu cuenta en SetMatch',
+    subject: 'Verificación de correo - SetMatch',
     html: `
       <h2>¡Bienvenido a SetMatch!</h2>
-      <p>Haz clic en el siguiente enlace para verificar tu correo:</p>
-      <a href="${verificationLink}">${verificationLink}</a>
+      <p>Haz clic en el siguiente enlace para verificar tu cuenta:</p>
+      <a href="${link}">${link}</a>
+      <p>Este enlace expirará en 10 minutos.</p>
     `
   };
   await transporter.sendMail(mailOptions);
 };
 
-// Definir el esquema de usuario
+// Definir el esquema de usuario temporal (para verificación)
+const pendingUserSchema = new mongoose.Schema({
+  nombre: String,
+  apellido: String,
+  apodo: String,
+  correo: { type: String, unique: true },
+  password: String,
+  tokenVerificacion: String,
+  tokenExpira: Date
+});
+
+const PendingUser = mongoose.model('pending_user', pendingUserSchema);
+
+// Definir el esquema de usuario final
 const userSchema = new mongoose.Schema({
   nombre: { type: String, required: true },
   apellido: { type: String, required: true },
   apodo: { type: String, unique: true, required: true },
   correo: { type: String, unique: true, required: true },
   password: { type: String, required: true },
-  verificado: { type: Boolean, default: false },
-  tokenVerificacion: { type: String }
+  verificado: { type: Boolean, default: true }
 });
 
-// Crear el modelo de usuario
 const Usuario = mongoose.model('user', userSchema);
 
-// 👉 Ruta para registrar un usuario
-app.post('/register', async (req, res) => {
+// 👉 Ruta para iniciar registro y enviar token de verificación
+app.post('/register-request', async (req, res) => {
   const { nombre, apellido, apodo, correo, password } = req.body;
 
   if (!nombre || !apellido || !apodo || !correo || !password) {
@@ -72,99 +84,60 @@ app.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'El correo ya está registrado' });
     }
 
+    await PendingUser.deleteOne({ correo }); // eliminar intentos anteriores
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+    const token = crypto.randomBytes(32).toString('hex');
 
-    const tokenVerificacion = crypto.randomBytes(32).toString('hex');
-
-    const nuevoUsuario = new Usuario({
+    const nuevoPendiente = new PendingUser({
       nombre,
       apellido,
       apodo,
       correo,
       password: hashedPassword,
-      verificado: false,
-      tokenVerificacion
+      tokenVerificacion: token,
+      tokenExpira: new Date(Date.now() + 10 * 60 * 1000) // 10 minutos
     });
 
-    await nuevoUsuario.save();
-    await sendVerificationEmail(correo, tokenVerificacion);
+    await nuevoPendiente.save();
+    await sendVerificationLink(correo, token);
 
-    res.status(201).json({
-      message: 'Registro exitoso. Verifica tu correo para activar la cuenta.'
-    });
-
+    res.status(200).json({ message: 'Correo de verificación enviado' });
   } catch (err) {
-    res.status(500).json({ error: 'Error al registrar el usuario', detalles: err.message });
+    res.status(500).json({ error: 'Error al procesar registro', detalles: err.message });
   }
 });
 
-// 👉 Ruta para verificar correo
-app.get('/verify/:token', async (req, res) => {
-  const { token } = req.params;
+// 👉 Ruta para verificar el token desde el deep link
+app.get('/verify-token', async (req, res) => {
+  const { token } = req.query;
 
   try {
-    const usuario = await Usuario.findOne({ tokenVerificacion: token });
-    if (!usuario) {
-      return res.status(400).json({ error: 'Token inválido o expirado' });
+    const pendiente = await PendingUser.findOne({ tokenVerificacion: token });
+    if (!pendiente) {
+      return res.status(400).json({ error: 'Token inválido o ya utilizado' });
     }
 
-    usuario.verificado = true;
-    usuario.tokenVerificacion = undefined;
-    await usuario.save();
-
-    res.status(200).json({ message: 'Correo verificado correctamente. Ya puedes iniciar sesión.' });
-  } catch (err) {
-    res.status(500).json({ error: 'Error al verificar el correo', detalles: err.message });
-  }
-});
-
-// 👉 Ruta para registrar con Google (sin verificación)
-app.post('/register-google', async (req, res) => {
-  const { nombre, apellido, correo, apodo, password } = req.body;
-
-  if (!nombre || !apellido || !correo || !apodo || !password) {
-    return res.status(400).json({ error: 'Faltan datos requeridos para el registro con Google' });
-  }
-
-  try {
-    const apodoExistente = await Usuario.findOne({ apodo });
-    if (apodoExistente) {
-      return res.status(400).json({ error: 'El apodo ya está en uso' });
+    if (pendiente.tokenExpira < new Date()) {
+      return res.status(400).json({ error: 'El token ha expirado' });
     }
-
-    const correoExistente = await Usuario.findOne({ correo });
-    if (correoExistente) {
-      return res.status(400).json({ error: 'Ya existe un usuario registrado con ese correo' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
 
     const nuevoUsuario = new Usuario({
-      nombre,
-      apellido,
-      apodo,
-      correo,
-      password: hashedPassword,
+      nombre: pendiente.nombre,
+      apellido: pendiente.apellido,
+      apodo: pendiente.apodo,
+      correo: pendiente.correo,
+      password: pendiente.password,
       verificado: true
     });
 
     await nuevoUsuario.save();
+    await PendingUser.deleteOne({ correo: pendiente.correo });
 
-    res.status(201).json({
-      message: 'Usuario registrado con Google correctamente',
-      usuario: {
-        id: nuevoUsuario._id,
-        nombre: nuevoUsuario.nombre,
-        apellido: nuevoUsuario.apellido,
-        apodo: nuevoUsuario.apodo,
-        correo: nuevoUsuario.correo
-      }
-    });
-
+    res.status(201).json({ message: 'Cuenta verificada y creada exitosamente' });
   } catch (err) {
-    res.status(500).json({ error: 'Error al registrar con Google', detalles: err.message });
+    res.status(500).json({ error: 'Error al verificar token', detalles: err.message });
   }
 });
 
@@ -180,10 +153,6 @@ app.post('/login', async (req, res) => {
     const usuario = await Usuario.findOne({ correo });
     if (!usuario) {
       return res.status(400).json({ error: 'Correo no registrado' });
-    }
-
-    if (!usuario.verificado) {
-      return res.status(403).json({ error: 'Verifica tu correo antes de iniciar sesión' });
     }
 
     const passwordValido = await bcrypt.compare(password, usuario.password);
