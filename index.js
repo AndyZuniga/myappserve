@@ -33,12 +33,13 @@ const sendVerificationLink = async (correo, token) => {
     html: `
       <h2>¡Bienvenido a SetMatch!</h2>
       <p>Haz clic en el siguiente enlace para verificar tu cuenta:</p>
-      <a href="${link}">${link}</a>
+      <p><a href="${link}">${link}</a></p>
       <p>Este enlace expirará en 10 minutos.</p>
     `
   };
   await transporter.sendMail(mailOptions);
 };
+
 
 // Definir el esquema de usuario temporal (para verificación)
 const pendingUserSchema = new mongoose.Schema({
