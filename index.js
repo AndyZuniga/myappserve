@@ -202,6 +202,102 @@ app.get('/usuarios', async (req, res) => {
   }
 });
 
+// ... Código existente arriba (sin cambios hasta este punto)
+
+// 🔴 NUEVO: Ruta para solicitar recuperación de contraseña
+app.post('/forgot-password', async (req, res) => {
+  const { correo } = req.body;
+  if (!correo) return res.status(400).json({ error: 'Correo es obligatorio' });
+
+  try {
+    const usuario = await Usuario.findOne({ correo });
+    if (!usuario) return res.status(400).json({ error: 'Correo no registrado' });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const link = `https://myappserve-go.onrender.com/reset-redirect?token=${token}`;
+
+    // Guardar temporalmente el token y expiración
+    usuario.tokenReset = token;
+    usuario.tokenExpira = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+    await usuario.save();
+
+    // Enviar correo con el enlace de recuperación
+    await transporter.sendMail({
+      from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
+      to: correo,
+      subject: 'Restablecer contraseña - SetMatch',
+      html: `
+        <h2>Solicitud para restablecer tu contraseña</h2>
+        <p>Haz clic en el siguiente enlace para continuar:</p>
+        <p><a href="${link}">${link}</a></p>
+        <p>Este enlace expirará en 10 minutos.</p>
+      `
+    });
+
+    res.status(200).json({ message: 'Enlace de recuperación enviado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al procesar recuperación', detalles: err.message });
+  }
+});
+
+// 🔴 NUEVO: Ruta que redirige del correo a la app (deep link)
+app.get('/reset-redirect', (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).send('Token faltante');
+  res.send(`
+    <html>
+      <head>
+        <meta http-equiv="refresh" content="0; url=setmatch://restablecer?token=${token}" />
+      </head>
+      <body>
+        <p>Redirigiendo a la app para restablecer contraseña...</p>
+      </body>
+    </html>
+  `);
+});
+
+// 🔴 NUEVO: Ruta para restablecer la contraseña con token
+app.post('/reset-password', async (req, res) => {
+  const { token, nuevaPassword } = req.body;
+  if (!token || !nuevaPassword) {
+    return res.status(400).json({ error: 'Token y nueva contraseña son obligatorios' });
+  }
+
+  try {
+    const usuario = await Usuario.findOne({ tokenReset: token });
+    if (!usuario) return res.status(400).json({ error: 'Token inválido o ya usado' });
+    if (usuario.tokenExpira < new Date()) {
+      return res.status(400).json({ error: 'El token ha expirado' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(nuevaPassword, salt);
+    usuario.password = hashedPassword;
+    usuario.tokenReset = undefined;
+    usuario.tokenExpira = undefined;
+    await usuario.save();
+
+    res.status(200).json({ message: 'Contraseña restablecida correctamente' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al restablecer contraseña', detalles: err.message });
+  }
+});
+
+// 🔁 Agrega esto también al esquema de Usuario
+// tokenReset: String,
+// tokenExpira: Date,
+
+// En el modelo Usuario (userSchema), añade estos dos campos:
+// tokenReset: String,
+// tokenExpira: Date,
+userSchema.add({
+  tokenReset: String,
+  tokenExpira: Date,
+});
+
+// ... Continuación de tu backend (404 handler, middleware, listen, etc.)
+
+
 // ⚠️ Ruta 404
 app.use((req, res) => {
   res.status(404).json({ error: `Ruta ${req.method} ${req.originalUrl} no encontrada` });
