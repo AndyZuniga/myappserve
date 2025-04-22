@@ -25,7 +25,7 @@ const transporter = nodemailer.createTransport({
 
 // Función para enviar enlace de verificación
 const sendVerificationLink = async (correo, token) => {
-  const link = `setmatch://verificar?token=${token}`;
+  const link = `https://myappserve-go.onrender.com/open-app?token=${token}`;
   const mailOptions = {
     from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
     to: correo,
@@ -40,6 +40,22 @@ const sendVerificationLink = async (correo, token) => {
   await transporter.sendMail(mailOptions);
 };
 
+// 👉 Ruta que redirige desde el enlace web al deep link
+app.get('/open-app', (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).send('Token faltante');
+
+  res.send(`
+    <html>
+      <head>
+        <meta http-equiv="refresh" content="0; url=setmatch://verificar?token=${token}" />
+      </head>
+      <body>
+        <p>Redirigiendo a la app...</p>
+      </body>
+    </html>
+  `);
+});
 
 // Definir el esquema de usuario temporal (para verificación)
 const pendingUserSchema = new mongoose.Schema({
