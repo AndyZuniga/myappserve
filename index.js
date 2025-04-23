@@ -14,7 +14,7 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ Conectado a MongoDB Atlas'))
   .catch(err => console.error('❌ Error al conectar a MongoDB:', err));
 
-// Configurar el transporter de Nodemailer
+// Configurar transporter de Nodemailer
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -23,41 +23,30 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Función para enviar enlace de verificación
+// --- Envío de enlaces de verificación ---
 const sendVerificationLink = async (correo, token) => {
   const link = `https://myappserve-go.onrender.com/open-app?token=${token}`;
-  const mailOptions = {
+  await transporter.sendMail({
     from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
     to: correo,
     subject: 'Verificación de correo - SetMatch',
-    html: `
-      <h2>¡Bienvenido a SetMatch!</h2>
-      <p>Haz clic en el siguiente enlace para verificar tu cuenta:</p>
-      <p><a href="${link}">${link}</a></p>
-      <p>Este enlace expirará en 10 minutos.</p>
-    `
-  };
-  await transporter.sendMail(mailOptions);
+    html: `<h2>¡Bienvenido a SetMatch!</h2>
+           <p>Verifica tu cuenta:</p>
+           <p><a href="${link}">${link}</a></p>
+           <p>Expira en 10 minutos.</p>`
+  });
 };
 
-// 👉 Ruta que redirige desde el enlace web al deep link
+// Ruta de deep link para verificación
 app.get('/open-app', (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).send('Token faltante');
-
-  res.send(`
-    <html>
-      <head>
-        <meta http-equiv="refresh" content="0; url=setmatch://verificar?token=${token}" />
-      </head>
-      <body>
-        <p>Redirigiendo a la app...</p>
-      </body>
-    </html>
-  `);
+  res.send(`<html><head>
+    <meta http-equiv="refresh" content="0; url=setmatch://verificar?token=${token}" />
+  </head><body><p>Redirigiendo a la app...</p></body></html>`);
 });
 
-// Definir el esquema de usuario temporal (para verificación)
+// Esquema de usuario temporal
 const pendingUserSchema = new mongoose.Schema({
   nombre: String,
   apellido: String,
@@ -67,229 +56,132 @@ const pendingUserSchema = new mongoose.Schema({
   tokenVerificacion: String,
   tokenExpira: Date
 });
-
 const PendingUser = mongoose.model('pending_user', pendingUserSchema);
 
-// Definir el esquema de usuario final
+// Esquema de usuario final incluyendo recuperación de contraseña
 const userSchema = new mongoose.Schema({
-  nombre: { type: String, required: true },
-  apellido: { type: String, required: true },
-  apodo: { type: String, unique: true, required: true },
-  correo: { type: String, unique: true, required: true },
-  password: { type: String, required: true },
-  verificado: { type: Boolean, default: true }
+  nombre:    { type: String, required: true },
+  apellido:  { type: String, required: true },
+  apodo:     { type: String, unique: true, required: true },
+  correo:    { type: String, unique: true, required: true },
+  password:  { type: String, required: true },
+  verificado:{ type: Boolean, default: true },
+  tokenReset:  String,
+  tokenExpira: Date
 });
-
 const Usuario = mongoose.model('user', userSchema);
 
-// 👉 Ruta para iniciar registro y enviar token de verificación
+// Registro y verificación
 app.post('/register-request', async (req, res) => {
   const { nombre, apellido, apodo, correo, password } = req.body;
-
   if (!nombre || !apellido || !apodo || !correo || !password) {
     return res.status(400).json({ error: 'Todos los campos son obligatorios' });
   }
-
   try {
-    const apodoExistente = await Usuario.findOne({ apodo });
-    if (apodoExistente) {
-      return res.status(400).json({ error: 'El apodo ya está en uso' });
-    }
-
-    const correoExistente = await Usuario.findOne({ correo });
-    if (correoExistente) {
-      return res.status(400).json({ error: 'El correo ya está registrado' });
-    }
-
-    await PendingUser.deleteOne({ correo }); // eliminar intentos anteriores
-
+    if (await Usuario.findOne({ apodo }))  return res.status(400).json({ error: 'El apodo ya está en uso' });
+    if (await Usuario.findOne({ correo })) return res.status(400).json({ error: 'El correo ya está registrado' });
+    await PendingUser.deleteOne({ correo });
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashed = await bcrypt.hash(password, salt);
     const token = crypto.randomBytes(32).toString('hex');
-
-    const nuevoPendiente = new PendingUser({
-      nombre,
-      apellido,
-      apodo,
-      correo,
-      password: hashedPassword,
-      tokenVerificacion: token,
-      tokenExpira: new Date(Date.now() + 10 * 60 * 1000) // 10 minutos
-    });
-
-    await nuevoPendiente.save();
+    await PendingUser.create({ nombre, apellido, apodo, correo, password: hashed, tokenVerificacion: token, tokenExpira: new Date(Date.now()+10*60*1000) });
     await sendVerificationLink(correo, token);
-
     res.status(200).json({ message: 'Correo de verificación enviado' });
   } catch (err) {
     res.status(500).json({ error: 'Error al procesar registro', detalles: err.message });
   }
 });
-
-// 👉 Ruta para verificar el token desde el deep link
 app.get('/verify-token', async (req, res) => {
   const { token } = req.query;
-
   try {
-    const pendiente = await PendingUser.findOne({ tokenVerificacion: token });
-    if (!pendiente) {
-      return res.status(400).json({ error: 'Token inválido o ya utilizado' });
-    }
-
-    if (pendiente.tokenExpira < new Date()) {
-      return res.status(400).json({ error: 'El token ha expirado' });
-    }
-
-    const nuevoUsuario = new Usuario({
-      nombre: pendiente.nombre,
-      apellido: pendiente.apellido,
-      apodo: pendiente.apodo,
-      correo: pendiente.correo,
-      password: pendiente.password,
-      verificado: true
-    });
-
-    await nuevoUsuario.save();
-    await PendingUser.deleteOne({ correo: pendiente.correo });
-
-    res.status(201).json({ message: 'Cuenta verificada y creada exitosamente' });
+    const p = await PendingUser.findOne({ tokenVerificacion: token });
+    if (!p) return res.status(400).json({ error: 'Token inválido o ya usado' });
+    if (p.tokenExpira < new Date()) return res.status(400).json({ error: 'Token expirado' });
+    await Usuario.create({ nombre:p.nombre, apellido:p.apellido, apodo:p.apodo, correo:p.correo, password:p.password, verificado:true });
+    await PendingUser.deleteOne({ correo:p.correo });
+    res.status(201).json({ message: 'Cuenta verificada exitosamente' });
   } catch (err) {
-    res.status(500).json({ error: 'Error al verificar token', detalles: err.message });
+    res.status(500).json({ error:'Error al verificar token', detalles:err.message });
   }
 });
 
-// 👉 Ruta de login sin token
+// Autenticación estándar
 app.post('/login', async (req, res) => {
   const { correo, password } = req.body;
-
-  if (!correo || !password) {
-    return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
-  }
-
+  if (!correo || !password) return res.status(400).json({ error:'Correo y contraseña son obligatorios' });
   try {
-    const usuario = await Usuario.findOne({ correo });
-    if (!usuario) {
-      return res.status(400).json({ error: 'Correo no registrado' });
-    }
-
-    const passwordValido = await bcrypt.compare(password, usuario.password);
-    if (!passwordValido) {
-      return res.status(401).json({ error: 'Contraseña incorrecta' });
-    }
-
-    res.json({
-      message: 'Inicio de sesión exitoso',
-      usuario: {
-        id: usuario._id,
-        apodo: usuario.apodo,
-        correo: usuario.correo,
-        nombre: usuario.nombre,
-        apellido: usuario.apellido
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
+    const u = await Usuario.findOne({ correo });
+    if (!u) return res.status(400).json({ error:'Correo no registrado' });
+    if (!await bcrypt.compare(password, u.password)) return res.status(401).json({ error:'Contraseña incorrecta' });
+    res.json({ message:'Inicio de sesión exitoso', usuario:{ id:u._id, apodo:u.apodo, correo:u.correo, nombre:u.nombre } });
+  } catch(err) {
+    res.status(500).json({ error:'Error al iniciar sesión', detalles:err.message });
   }
 });
-
-// 👉 Ruta para obtener todos los usuarios
 app.get('/usuarios', async (req, res) => {
-  try {
-    const usuarios = await Usuario.find().select('-password');
-    res.json(usuarios);
-  } catch (err) {
-    res.status(500).json({ error: 'Error al obtener usuarios', detalles: err.message });
-  }
+  try { res.json(await Usuario.find().select('-password')); } catch(err) { res.status(500).json({ error:'Error al obtener usuarios', detalles:err.message }); }
 });
 
-// ... Código existente arriba (sin cambios hasta este punto)
-
-// 🔴 NUEVO: Ruta para solicitar recuperación de contraseña
+// Recuperación de contraseña
 app.post('/forgot-password', async (req, res) => {
   const { correo } = req.body;
-  if (!correo) return res.status(400).json({ error: 'Correo es obligatorio' });
+  if (!correo) return res.status(400).json({ error:'Correo es obligatorio' });
   try {
-    const usuario = await Usuario.findOne({ correo });
-    if (!usuario) return res.status(400).json({ error: 'Correo no registrado' });
-
-    // 🔴 CAMBIO: generar y guardar UN solo token, sobreescribiendo cualquier anterior
+    const u = await Usuario.findOne({ correo });
+    if (!u) return res.status(400).json({ error:'Correo no registrado' });
     const token = crypto.randomBytes(32).toString('hex');
-    usuario.tokenReset  = token;
-    usuario.tokenExpira = new Date(Date.now() + 10 * 60 * 1000); // expira en 10 min
-    await usuario.save(); // guardar cambios
-
+    u.tokenReset  = token;
+    u.tokenExpira = new Date(Date.now()+10*60*1000);
+    await u.save();
     const link = `https://myappserve-go.onrender.com/reset-redirect?token=${token}`;
-    await transporter.sendMail({
-      from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
-      to: correo,
-      subject: 'Restablecer contraseña - SetMatch',
-      html: `<h2>Solicitud para restablecer tu contraseña</h2>
-             <p><a href="${link}">${link}</a></p>
-             <p>Expira en 10 minutos.</p>`
-    });
-
-    res.status(200).json({ message: 'Enlace de recuperación enviado' });
-  } catch (err) {
-    res.status(500).json({ error: 'Error al procesar recuperación', detalles: err.message });
+    await transporter.sendMail({ from:`"SetMatch Soporte" <${process.env.EMAIL_USER}>`, to:correo, subject:'Restablecer contraseña - SetMatch', html:`<h2>Restablecer tu contraseña</h2><p><a href="${link}">${link}</a></p><p>Expira en 10 minutos.</p>` });
+    console.log('[forgot-password] Token generado', { correo, token });
+    res.status(200).json({ message:'Enlace de recuperación enviado' });
+  } catch(err) {
+    res.status(500).json({ error:'Error al procesar recuperación', detalles:err.message });
   }
 });
-
-// Redirige a deep link para restablecer contraseña
 app.get('/reset-redirect', (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).send('Token faltante');
-  res.send(`
-    <html><head>
-      <meta http-equiv="refresh"
-            content="0; url=setmatch://restablecer?token=${token}" />
-    </head><body>
-      <p>Redirigiendo a la app...</p>
-    </body></html>
-  `);
+  res.send(`<html><head><meta http-equiv="refresh" content="0; url=setmatch://restablecer?token=${token}" /></head><body><p>Redirigiendo a la app...</p></body></html>`);
 });
-
-// Ruta para restablecer contraseña usando el token
 app.post('/reset-password', async (req, res) => {
   const { token, nuevaPassword } = req.body;
-  if (!token || !nuevaPassword)
-    return res.status(400).json({ error: 'Token y nueva contraseña son obligatorios' });
+  if (!token || !nuevaPassword) {
+    console.error('[reset-password] Falta token o nuevaPassword', { token, nuevaPassword });
+    return res.status(400).json({ error:'Token y nueva contraseña son obligatorios' });
+  }
   try {
-    const usuario = await Usuario.findOne({ tokenReset: token });
-    if (!usuario)
-      return res.status(400).json({ error: 'Token inválido o ya usado' });
-    if (usuario.tokenExpira < new Date())
-      return res.status(400).json({ error: 'El token ha expirado' });
-
-    // 🔴 Hashear y guardar nueva contraseña
+    const u = await Usuario.findOne({ tokenReset:token });
+    if (!u) {
+      console.error('[reset-password] Token inválido o ya usado', { token });
+      return res.status(400).json({ error:'Token inválido o ya usado', details:{ receivedToken:token } });
+    }
+    if (u.tokenExpira < new Date()) {
+      console.error('[reset-password] Token expirado', { token, expiresAt:u.tokenExpira });
+      u.tokenReset = undefined;
+      u.tokenExpira=undefined;
+      await u.save();
+      return res.status(400).json({ error:'El token ha expirado', details:{ receivedToken:token, expiredAt:u.tokenExpira } });
+    }
     const salt = await bcrypt.genSalt(10);
-    usuario.password = await bcrypt.hash(nuevaPassword, salt);
-    // 🔴 Eliminar token para invalidar usos posteriores
-    usuario.tokenReset  = undefined;
-    usuario.tokenExpira = undefined;
-    await usuario.save();
-
-    res.status(200).json({ message: 'Contraseña restablecida correctamente' });
-  } catch (err) {
-    res.status(500).json({ error: 'Error al restablecer contraseña', detalles: err.message });
+    u.password = await bcrypt.hash(nuevaPassword, salt);
+    u.tokenReset = undefined;
+    u.tokenExpira=undefined;
+    await u.save();
+    console.log('[reset-password] Contraseña restablecida', { userId:u._id });
+    res.status(200).json({ message:'Contraseña restablecida correctamente' });
+  } catch(err) {
+    console.error('[reset-password] Error interno', err);
+    res.status(500).json({ error:'Error al restablecer contraseña', detalles:err.message, stack:err.stack });
   }
 });
 
-// ... Continuación de tu backend (404 handler, middleware, listen, etc.)
+// 404 y errores
+app.use((req, res) => res.status(404).json({ error:`Ruta ${req.method} ${req.originalUrl} no encontrada` }));
+app.use((err, req, res, next) => { console.error(err.stack); res.status(500).json({ error:'Error interno', mensaje:err.message }); });
 
-
-// ⚠️ Ruta 404
-app.use((req, res) => {
-  res.status(404).json({ error: `Ruta ${req.method} ${req.originalUrl} no encontrada` });
-});
-
-// 🛠 Middleware de errores
-app.use((err, req, res, next) => {
-  console.error('Error interno:', err.stack);
-  res.status(500).json({ error: 'Error interno del servidor', mensaje: err.message });
-});
-
-// 🟢 Iniciar el servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-});
+// Iniciar servidor
+const PORT = process.env.PORT||3000;
+app.listen(PORT,()=>console.log(`🚀 Servidor corriendo en puerto ${PORT}`));
