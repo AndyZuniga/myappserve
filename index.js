@@ -239,6 +239,54 @@ app.post('/library/remove', async (req, res) => {
   }
 });
 
+app.post('/library/add', async (req, res) => {
+  const { userId, cardId } = req.body;
+  if (!userId || !cardId) {
+    return res.status(400).json({ error: 'Falta userId o cardId' });
+  }
+  try {
+    const user = await Usuario.findById(userId);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    // Buscar si ya existe esa carta
+    const entry = user.library.find(e => e.cardId === cardId);
+    if (entry) {
+      entry.quantity += 1;
+    } else {
+      user.library.push({ cardId, quantity: 1 });
+    }
+    await user.save();
+    res.json({ library: user.library });
+  } catch (err) {
+    console.error('[library/add]', err);
+    res.status(500).json({ error: 'Error interno al agregar carta' });
+  }
+});
+
+// 📤 Quitar carta del usuario
+app.post('/library/remove', async (req, res) => {
+  const { userId, cardId } = req.body;
+  if (!userId || !cardId) {
+    return res.status(400).json({ error: 'Falta userId o cardId' });
+  }
+  try {
+    const user = await Usuario.findById(userId);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const idx = user.library.findIndex(e => e.cardId === cardId);
+    if (idx === -1) {
+      return res.status(400).json({ error: 'Carta no existe en librería' });
+    }
+    user.library[idx].quantity -= 1;
+    if (user.library[idx].quantity <= 0) {
+      user.library.splice(idx, 1);
+    }
+    await user.save();
+    res.json({ library: user.library });
+  } catch (err) {
+    console.error('[library/remove]', err);
+    res.status(500).json({ error: 'Error interno al quitar carta' });
+  }
+});
+
 
 // 404 y errores
 app.use((req, res) => res.status(404).json({ error:`Ruta ${req.method} ${req.originalUrl} no encontrada` }));
