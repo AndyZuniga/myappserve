@@ -67,7 +67,11 @@ const userSchema = new mongoose.Schema({
   password:  { type: String, required: true },
   verificado:{ type: Boolean, default: true },
   tokenReset:  String,
-  tokenExpira: Date
+  tokenExpira: Date,
+    library: [{
+    cardId:   { type: String, required: true },
+    quantity: { type: Number, default: 0 }
+  }]
 });
 const Usuario = mongoose.model('user', userSchema);
 
@@ -177,6 +181,64 @@ app.post('/reset-password', async (req, res) => {
     res.status(500).json({ error:'Error al restablecer contraseña', detalles:err.message, stack:err.stack });
   }
 });
+
+// --- Librería de cartas: agregar, remover y listar ---
+
+// Agregar 1 carta (incrementa cantidad o la inserta)
+app.post('/library/add', async (req, res) => {
+  const { userId, cardId } = req.body;
+  if (!userId || !cardId) {
+    return res.status(400).json({ error: 'userId y cardId son obligatorios' });
+  }
+  try {
+    const user = await Usuario.findById(userId);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const entry = user.library.find(e => e.cardId === cardId);
+    if (entry) {
+      entry.quantity += 1;   // 🔴 incrementa
+    } else {
+      user.library.push({    // 🔴 nueva carta
+        cardId,
+        quantity: 1
+      });
+    }
+
+    await user.save();
+    res.json({ message: 'Carta agregada', library: user.library });
+  } catch (err) {
+    res.status(500).json({ error: 'Error agregando carta', detalles: err.message });
+  }
+});
+
+
+// Remover 1 carta (decrementa o elimina si queda 0)
+app.post('/library/remove', async (req, res) => {
+  const { userId, cardId } = req.body;
+  if (!userId || !cardId) {
+    return res.status(400).json({ error: 'userId y cardId son obligatorios' });
+  }
+  try {
+    const user = await Usuario.findById(userId);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const idx = user.library.findIndex(e => e.cardId === cardId);
+    if (idx === -1) {
+      return res.status(400).json({ error: 'Carta no está en la librería' });
+    }
+    if (user.library[idx].quantity > 1) {
+      user.library[idx].quantity -= 1;
+    } else {
+      user.library.splice(idx, 1);
+    }
+
+    await user.save();
+    res.json({ message: 'Carta removida', library: user.library });
+  } catch (err) {
+    res.status(500).json({ error: 'Error quitando carta', detalles: err.message });
+  }
+});
+
 
 // 404 y errores
 app.use((req, res) => res.status(404).json({ error:`Ruta ${req.method} ${req.originalUrl} no encontrada` }));
