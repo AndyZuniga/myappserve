@@ -70,7 +70,7 @@ const userSchema = new mongoose.Schema({
   tokenExpira: Date,
     library: [{
     cardId:   { type: String, required: true },
-    quantity: { type: Number, default: 0 }
+    quantity: { type: Number, default: 1 }
   }]
 });
 const Usuario = mongoose.model('user', userSchema);
@@ -285,6 +285,11 @@ app.post('/library/remove', async (req, res) => {
     console.error('[library/remove]', err);
     res.status(500).json({ error: 'Error interno al quitar carta' });
   }
+});
+app.get('/library', async (req, res) => {
+  const { userId } = req.query;
+  const user = await Usuario.findById(userId).select('library');
+  return res.json({ library: user.library });
 });
 
 
