@@ -267,6 +267,17 @@ app.get('/library', async (req, res) => {
   }
 });
 
+// Obtener todos los usuarios (para buscador de amigos)
+app.get('/users/all', async (req, res) => {
+  try {
+    const users = await Usuario.find().select('nombre apellido apodo correo _id');
+    res.json({ users });
+  } catch (err) {
+    console.error('[users/all] error:', err);
+    res.status(500).json({ error:'Error interno al obtener todos los usuarios' });
+  }
+});
+
 
 
 
