@@ -278,17 +278,36 @@ app.get('/users/all', async (req, res) => {
   }
 });
 
-// Búsqueda usuarios
-app.get('/users/all', async (req, res) => {
-  try { const users = await Usuario.find().select('nombre apellido apodo correo _id'); res.json({ users }); }
-  catch(err){ console.error('[users/all]',err); res.status(500).json({ error:'Error interno' }); }
+
+
+// Buscar usuarios por nombre, apellido o apodo (case-insensitive)
+app.get('/users/search', async (req, res) => {
+  const { query } = req.query;
+  if (!query) {
+    return res.status(400).json({ error: 'Query faltante' });
+  }
+  try {
+    const regex = new RegExp(query, 'i');
+    const conditions = [
+      { nombre:    regex },
+      { apellido:  regex },
+      { apodo:     regex }
+    ];
+    if (mongoose.Types.ObjectId.isValid(query)) {
+      conditions.push({ _id: query });
+    }
+    const users = await Usuario.find({ $or: conditions }).select('nombre apellido apodo correo _id');
+    res.json({ users });
+  } catch (err) {
+    console.error('[users/search] error:', err);
+    res.status(500).json({ error:'Error interno al buscar usuarios' });
+  }
 });
 
 // Agregar amigo mutuo
 app.post('/users/:id/add-friend', async (req, res) => {
   const currentUserId = req.body.userId;
   const friendId = req.params.id;
-  // Validar IDs
   if (!mongoose.Types.ObjectId.isValid(currentUserId) || !mongoose.Types.ObjectId.isValid(friendId)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
@@ -296,12 +315,11 @@ app.post('/users/:id/add-friend', async (req, res) => {
     return res.status(400).json({ error: 'No puedes agregarte a ti mismo' });
   }
   try {
-    // Añadir mutuamente ambos IDs al array de friends
+    // Añadir mutuamente
     await Promise.all([
       Usuario.findByIdAndUpdate(currentUserId, { $addToSet: { friends: friendId } }),
       Usuario.findByIdAndUpdate(friendId, { $addToSet: { friends: currentUserId } })
     ]);
-    // Devolver lista de amigos actualizada de currentUser
     const populated = await Usuario.findById(currentUserId).populate('friends', 'nombre apellido apodo');
     res.json({ friends: populated.friends });
   } catch (err) {
@@ -310,15 +328,19 @@ app.post('/users/:id/add-friend', async (req, res) => {
   }
 });
 
-// Obtener lista de amigos
+// Obtener lista de amigos del usuario
 app.get('/friends', async (req, res) => {
   const { userId } = req.query;
-  if (!mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ error:'ID inválido' });
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID inválido o faltante' });
+  }
   try {
-    const populated = await Usuario.findById(userId).populate('friends','nombre apellido apodo');
-    if (!populated) return res.status(404).json({ error:'Usuario no encontrado' });
-    res.json({ friends: populated.friends });
-  } catch(err){ console.error('[friends/get]',err); res.status(500).json({ error:'Error interno al obtener amigos' }); }
+    const user = await Usuario.findById(userId).populate('friends', 'nombre apellido apodo _id');
+    res.json({ friends: user ? user.friends : [] });
+  } catch (err) {
+    console.error('[friends/get]', err);
+    res.status(500).json({ error: 'Error interno al obtener amigos' });
+  }
 });
 
 
