@@ -280,23 +280,27 @@ app.get('/users/all', async (req, res) => {
 
 
 
-// Buscar usuarios por nombre, apellido o apodo (case-insensitive)
 app.get('/users/search', async (req, res) => {
   const { query } = req.query;
-  if (!query) {
-    return res.status(400).json({ error: 'Query faltante' });
-  }
+  if (!query) return res.status(400).json({ error: 'Query faltante' });
   try {
     const regex = new RegExp(query, 'i');
     const conditions = [
-      { nombre:    regex },
-      { apellido:  regex },
-      { apodo:     regex }
+      { nombre: regex },
+      { apellido: regex },
+      { apodo: regex }
     ];
     if (mongoose.Types.ObjectId.isValid(query)) {
       conditions.push({ _id: query });
     }
-    const users = await Usuario.find({ $or: conditions }).select('nombre apellido apodo correo _id');
+    const parts = query.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      const regex1 = new RegExp(parts[0], 'i');
+      const regex2 = new RegExp(parts[1], 'i');
+      conditions.push({ $and: [ { nombre: regex1 }, { apellido: regex2 } ] });
+    }
+    const users = await Usuario.find({ $or: conditions })
+      .select('nombre apellido apodo correo _id');
     res.json({ users });
   } catch (err) {
     console.error('[users/search] error:', err);
