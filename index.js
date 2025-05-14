@@ -267,6 +267,65 @@ app.get('/library', async (req, res) => {
   }
 });
 
+// --- Amistades: búsqueda, agregar y listar ---
+app.get('/users/search', async (req, res) => {
+  const { query } = req.query;
+  if (!query) return res.status(400).json({ error: 'Falta parámetro query' });
+  const re = new RegExp(query, 'i');
+  try {
+    const results = await Usuario.find({
+      $or: [
+        { nombre: re },
+        { apellido: re },
+        { apodo: re },
+        { _id: query }
+      ]
+    }).select('nombre apellido apodo');
+    res.json({ users: results });
+  } catch (err) {
+    console.error('[users/search]', err);
+    res.status(500).json({ error: 'Error interno al buscar usuarios' });
+  }
+});
+
+app.post('/users/:id/add-friend', async (req, res) => {
+  const currentUserId = req.body.userId;
+  const friendId = req.params.id;
+  if (!mongoose.Types.ObjectId.isValid(currentUserId) || !mongoose.Types.ObjectId.isValid(friendId)) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  if (currentUserId === friendId) return res.status(400).json({ error: 'No puedes agregarte a ti mismo' });
+  try {
+    const user = await Usuario.findByIdAndUpdate(
+      currentUserId,
+      { $addToSet: { friends: friendId } },
+      { new: true }
+    ).populate('friends', 'nombre apellido apodo');
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    // bidireccional opcional:
+    // await Usuario.findByIdAndUpdate(friendId, { $addToSet: { friends: currentUserId } });
+    res.json({ friends: user.friends });
+  } catch (err) {
+    console.error('[add-friend]', err);
+    res.status(500).json({ error: 'Error interno al agregar amigo' });
+  }
+});
+
+app.get('/friends', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID de usuario inválido o faltante' });
+  }
+  try {
+    const user = await Usuario.findById(userId).populate('friends', 'nombre apellido apodo');
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    res.json({ friends: user.friends });
+  } catch (err) {
+    console.error('[friends/get]', err);
+    res.status(500).json({ error: 'Error interno al obtener amigos' });
+  }
+});
+
 
 
 // 404 y errores
