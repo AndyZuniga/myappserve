@@ -267,7 +267,7 @@ app.get('/library', async (req, res) => {
   }
 });
 
-// Obtener todos los usuarios (para buscador de amigos)
+// Obtener todos los usuarios
 app.get('/users/all', async (req, res) => {
   try {
     const users = await Usuario.find().select('nombre apellido apodo correo _id');
@@ -278,8 +278,7 @@ app.get('/users/all', async (req, res) => {
   }
 });
 
-
-
+// Buscar usuarios por nombre, apellido, apodo o ID
 app.get('/users/search', async (req, res) => {
   const { query } = req.query;
   if (!query) return res.status(400).json({ error: 'Query faltante' });
@@ -290,17 +289,12 @@ app.get('/users/search', async (req, res) => {
       { apellido: regex },
       { apodo: regex }
     ];
-    if (mongoose.Types.ObjectId.isValid(query)) {
-      conditions.push({ _id: query });
-    }
+    if (mongoose.Types.ObjectId.isValid(query)) conditions.push({ _id: query });
     const parts = query.trim().split(/\s+/);
     if (parts.length >= 2) {
-      const regex1 = new RegExp(parts[0], 'i');
-      const regex2 = new RegExp(parts[1], 'i');
-      conditions.push({ $and: [ { nombre: regex1 }, { apellido: regex2 } ] });
+      conditions.push({ $and: [ { nombre: new RegExp(parts[0],'i') }, { apellido: new RegExp(parts[1],'i') } ] });
     }
-    const users = await Usuario.find({ $or: conditions })
-      .select('nombre apellido apodo correo _id');
+    const users = await Usuario.find({ $or: conditions }).select('nombre apellido apodo correo _id');
     res.json({ users });
   } catch (err) {
     console.error('[users/search] error:', err);
@@ -308,27 +302,86 @@ app.get('/users/search', async (req, res) => {
   }
 });
 
-// Agregar amigo mutuo
-app.post('/users/:id/add-friend', async (req, res) => {
-  const currentUserId = req.body.userId;
-  const friendId = req.params.id;
-  if (!mongoose.Types.ObjectId.isValid(currentUserId) || !mongoose.Types.ObjectId.isValid(friendId)) {
+// Enviar solicitud de amistad
+app.post('/friend-request', async (req, res) => {
+  const { from, to } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
-  if (currentUserId === friendId) {
-    return res.status(400).json({ error: 'No puedes agregarte a ti mismo' });
+  if (from === to) return res.status(400).json({ error: 'No puedes enviarte a ti mismo' });
+  try {
+    // Revisar si ya existe una solicitud pendiente o amistad
+    const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
+    if (exists) return res.status(400).json({ error: 'Solicitud ya enviada' });
+    // Crear nueva solicitud
+    const request = await FriendRequest.create({ from, to });
+    res.json({ request });
+  } catch (err) {
+    console.error('[friend-request] error:', err);
+    res.status(500).json({ error: 'Error interno al enviar solicitud' });
+  }
+});
+
+// Ver solicitudes recibidas
+app.get('/friend-requests', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID inválido o faltante' });
   }
   try {
-    // Añadir mutuamente
-    await Promise.all([
-      Usuario.findByIdAndUpdate(currentUserId, { $addToSet: { friends: friendId } }),
-      Usuario.findByIdAndUpdate(friendId, { $addToSet: { friends: currentUserId } })
-    ]);
-    const populated = await Usuario.findById(currentUserId).populate('friends', 'nombre apellido apodo');
-    res.json({ friends: populated.friends });
+    const requests = await FriendRequest.find({ to: userId, status: 'pending' })
+      .populate('from', 'nombre apellido apodo _id');
+    res.json({ requests });
   } catch (err) {
-    console.error('[add-friend]', err);
-    res.status(500).json({ error: 'Error interno al agregar amigo' });
+    console.error('[friend-requests] error:', err);
+    res.status(500).json({ error: 'Error interno al obtener solicitudes' });
+  }
+});
+
+// Aceptar solicitud
+app.post('/friend-request/:id/accept', async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'ID de solicitud inválido' });
+  }
+  try {
+    const reqDoc = await FriendRequest.findById(id);
+    if (!reqDoc || reqDoc.status !== 'pending') {
+      return res.status(404).json({ error: 'Solicitud no encontrada o no pendiente' });
+    }
+    // Actualizar estado
+    reqDoc.status = 'accepted';
+    await reqDoc.save();
+    // Agregar mutuamente en friends
+    const { from, to } = reqDoc;
+    await Promise.all([
+      Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
+      Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
+    ]);
+    res.json({ message: 'Solicitud aceptada' });
+  } catch (err) {
+    console.error('[accept-request] error:', err);
+    res.status(500).json({ error: 'Error interno al aceptar solicitud' });
+  }
+});
+
+// Rechazar solicitud
+app.post('/friend-request/:id/reject', async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'ID de solicitud inválido' });
+  }
+  try {
+    const reqDoc = await FriendRequest.findById(id);
+    if (!reqDoc || reqDoc.status !== 'pending') {
+      return res.status(404).json({ error: 'Solicitud no encontrada o no pendiente' });
+    }
+    reqDoc.status = 'rejected';
+    await reqDoc.save();
+    res.json({ message: 'Solicitud rechazada' });
+  } catch (err) {
+    console.error('[reject-request] error:', err);
+    res.status(500).json({ error: 'Error interno al rechazar solicitud' });
   }
 });
 
@@ -342,7 +395,7 @@ app.get('/friends', async (req, res) => {
     const user = await Usuario.findById(userId).populate('friends', 'nombre apellido apodo _id');
     res.json({ friends: user ? user.friends : [] });
   } catch (err) {
-    console.error('[friends/get]', err);
+    console.error('[friends/get] error:', err);
     res.status(500).json({ error: 'Error interno al obtener amigos' });
   }
 });
