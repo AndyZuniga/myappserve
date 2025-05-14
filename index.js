@@ -322,7 +322,7 @@ app.get('/friends', async (req, res) => {
     res.json({ friends: user.friends });
   } catch (err) {
     console.error('[friends/get]', err);
-    res.status(500).json({ error: 'Error interno al obtener amigos' });
+    res.status(500).json({ error: 'Error interno al obtener amigos y amigas' });
   }
 });
 
