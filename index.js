@@ -402,6 +402,7 @@ app.get('/friends', async (req, res) => {
 
 
 
+
 // 404 y errores
 app.use((req, res) => res.status(404).json({ error:`Ruta ${req.method} ${req.originalUrl} no encontrada` }));
 app.use((err, req, res, next) => { console.error(err.stack); res.status(500).json({ error:'Error interno', mensaje:err.message }); });
