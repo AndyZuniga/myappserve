@@ -266,7 +266,95 @@ app.get('/library', async (req, res) => {
     res.status(500).json({ error: 'Error interno al obtener la bibliotecas' });
   }
 });
-// 403 y errores
+// Obtener todos usuarios
+app.get('/users/all', async (req, res) => {
+  try {
+    const users = await Usuario.find().select('nombre apellido apodo correo _id');
+    res.json({ users });
+  } catch (err) {
+    console.error('[users/all] error:', err);
+    res.status(500).json({ error: 'Error interno al obtener todos los usuarios' });
+  }
+});
+
+// Solicitud de amistad
+app.post('/friend-request', async (req, res) => {
+  const { from, to } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to)) return res.status(400).json({ error: 'ID inválido' });
+  if (from === to) return res.status(400).json({ error: 'No puedes enviarte a ti mismo' });
+  try {
+    const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
+    if (exists) return res.status(400).json({ error: 'Solicitud ya enviada' });
+    const request = await FriendRequest.create({ from, to });
+    res.json({ request });
+  } catch (err) {
+    console.error('[friend-request] error:', err);
+    res.status(500).json({ error: 'Error interno al enviar solicitud' });
+  }
+});
+
+// Ver solicitudes pendientes
+app.get('/friend-requests', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ error: 'ID inválido o faltante' });
+  try {
+    const requests = await FriendRequest.find({ to: userId, status: 'pending' }).populate('from', 'nombre apellido apodo _id');
+    res.json({ requests });
+  } catch (err) {
+    console.error('[friend-requests] error:', err);
+    res.status(500).json({ error: 'Error interno al obtener solicitudes' });
+  }
+});
+
+// Aceptar solicitud
+app.post('/friend-request/:id/accept', async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'ID de solicitud inválido' });
+  try {
+    const reqDoc = await FriendRequest.findById(id);
+    if (!reqDoc || reqDoc.status !== 'pending') return res.status(404).json({ error: 'Solicitud no encontrada o no pendiente' });
+    reqDoc.status = 'accepted';
+    await reqDoc.save();
+    const { from, to } = reqDoc;
+    await Promise.all([
+      Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
+      Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
+    ]);
+    res.json({ message: 'Solicitud aceptada' });
+  } catch (err) {
+    console.error('[accept-request] error:', err);
+    res.status(500).json({ error: 'Error interno al aceptar solicitud' });
+  }
+});
+
+// Rechazar solicitud
+app.post('/friend-request/:id/reject', async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'ID de solicitud inválido' });
+  try {
+    const reqDoc = await FriendRequest.findById(id);
+    if (!reqDoc || reqDoc.status !== 'pending') return res.status(404).json({ error: 'Solicitud no encontrada o no pendiente' });
+    reqDoc.status = 'rejected';
+    await reqDoc.save();
+    res.json({ message: 'Solicitud rechazada' });
+  } catch (err) {
+    console.error('[reject-request] error:', err);
+    res.status(500).json({ error: 'Error interno al rechazar solicitud' });
+  }
+});
+
+// Obtener lista de amigos
+app.get('/friends', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ error: 'ID inválido o faltante' });
+  try {
+    const user = await Usuario.findById(userId).populate('friends', 'nombre apellido apodo _id');
+    res.json({ friends: user ? user.friends : [] });
+  } catch (err) {
+    console.error('[friends/get] error:', err);
+    res.status(500).json({ error: 'Error interno al obtener amigos' });
+  }
+});
 // 404 y errores
 app.use((req, res) => res.status(404).json({ error:`Ruta ${req.method} ${req.originalUrl} no encontrada` }));
 app.use((err, req, res, next) => { console.error(err.stack); res.status(500).json({ error:'Error interno', mensaje:err.message }); });
