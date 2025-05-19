@@ -284,32 +284,27 @@ app.get('/users/all', async (req, res) => {
   }
 });
 
-// Solicitud de amistad
+// Solicitud de amistad revisada: elimina solicitudes previas y crea nueva
 app.post('/friend-request', async (req, res) => {
   const { from, to } = req.body;
-  if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to)) return res.status(400).json({ error: 'ID inválido' });
+  // Validaciones iniciales
+  if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to))
+    return res.status(400).json({ error: 'ID inválido' });
   if (from === to) return res.status(400).json({ error: 'No puedes enviarte a ti mismo' });
   try {
-    const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
-    if (exists) return res.status(400).json({ error: 'Solicitud ya enviada' });
+    // Eliminar solicitudes existentes en cualquier dirección para permitir reenvío
+    await FriendRequest.deleteMany({
+      $or: [
+        { from, to },
+        { from: to, to: from }
+      ]
+    });
+    // Crear nueva solicitud de amistad
     const request = await FriendRequest.create({ from, to });
     res.json({ request });
   } catch (err) {
     console.error('[friend-request] error:', err);
     res.status(500).json({ error: 'Error interno al enviar solicitud' });
-  }
-});
-
-// Ver solicitudes pendientes
-app.get('/friend-requests', async (req, res) => {
-  const { userId } = req.query;
-  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ error: 'ID inválido o faltante' });
-  try {
-    const requests = await FriendRequest.find({ to: userId, status: 'pending' }).populate('from', 'nombre apellido apodo _id');
-    res.json({ requests });
-  } catch (err) {
-    console.error('[friend-requests] error:', err);
-    res.status(500).json({ error: 'Error interno al obtener solicitudes' });
   }
 });
 
