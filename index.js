@@ -285,6 +285,8 @@ app.get('/users/all', async (req, res) => {
 });
 
 // Solicitud de amistad revisada: elimina solicitudes previas y crea nueva
+
+// Solicitud de amistad revisada: elimina solicitudes previas y crea nueva
 app.post('/friend-request', async (req, res) => {
   const { from, to } = req.body;
   // Validaciones iniciales
