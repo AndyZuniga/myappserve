@@ -363,7 +363,7 @@ app.get('/friends', async (req, res) => {
   }
 });
 
-// Eliminar amistad: elimina mutuamente de ambos usuarios
+// Eliminar amistad: elimina mutuamente de ambos usuarios y borra solicitudes pendientes
 app.post('/friend-remove', async (req, res) => {
   const { userId, friendId } = req.body;
   if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(friendId))
@@ -373,7 +373,14 @@ app.post('/friend-remove', async (req, res) => {
       Usuario.findByIdAndUpdate(userId, { $pull: { friends: friendId }}),
       Usuario.findByIdAndUpdate(friendId, { $pull: { friends: userId }})
     ]);
-    res.json({ message: 'Amistad eliminada' });
+    // Eliminar solicitudes de amistad pendientes entre ambos
+    await FriendRequest.deleteMany({
+      $or: [
+        { from: userId, to: friendId },
+        { from: friendId, to: userId }
+      ]
+    });
+    res.json({ message: 'Amistad eliminada y solicitudes pendientes borradas' });
   } catch(err) {
     console.error('[friend-remove] error:', err);
     res.status(500).json({ error:'Error interno al eliminar amistad' });
