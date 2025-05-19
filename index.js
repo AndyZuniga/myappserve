@@ -285,7 +285,19 @@ app.get('/users/all', async (req, res) => {
 });
 
 // Solicitud de amistad revisada: elimina solicitudes previas y crea nueva
-
+app.get('/friend-requests', async (req, res) => {
+  const { userId } = req.query;
+  if (!mongoose.Types.ObjectId.isValid(userId))
+    return res.status(400).json({ error: 'ID inválido o faltante' });
+  try {
+    const requests = await FriendRequest.find({ to: userId, status: 'pending' })
+      .populate('from', 'nombre apellido apodo _id');
+    res.json({ requests });
+  } catch (err) {
+    console.error('[friend-requests] error:', err);
+    res.status(500).json({ error: 'Error interno al obtener solicitudes' });
+  }
+});
 // Solicitud de amistad revisada: elimina solicitudes previas y crea nueva
 app.post('/friend-request', async (req, res) => {
   const { from, to } = req.body;
