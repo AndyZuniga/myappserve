@@ -68,11 +68,9 @@ const userSchema = new mongoose.Schema({
   verificado:{ type: Boolean, default: true },
   tokenReset:  String,
   tokenExpira: Date,
-    library: [{
-    cardId:   { type: String, required: true },
-    quantity: { type: Number, default: 1 }
-  }],
-  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user'}]
+  library: [{cardId:   { type: String, required: true },quantity: { type: Number, default: 1 }}],
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],  // lista de amigos
+  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }]  // usuarios bloqueados
 });
 const Usuario = mongoose.model('user', userSchema);
 //  ADICIÓN: Definición de esquema y modelo para solicitudes de amistad
@@ -362,6 +360,73 @@ app.get('/friends', async (req, res) => {
   } catch (err) {
     console.error('[friends/get] error:', err);
     res.status(500).json({ error: 'Error interno al obtener amigos' });
+  }
+});
+
+// Eliminar amistad: elimina mutuamente de ambos usuarios
+app.post('/friend-remove', async (req, res) => {
+  const { userId, friendId } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(friendId))
+    return res.status(400).json({ error: 'ID inválido' });
+  try {
+    await Promise.all([
+      Usuario.findByIdAndUpdate(userId, { $pull: { friends: friendId }}),
+      Usuario.findByIdAndUpdate(friendId, { $pull: { friends: userId }})
+    ]);
+    res.json({ message: 'Amistad eliminada' });
+  } catch(err) {
+    console.error('[friend-remove] error:', err);
+    res.status(500).json({ error:'Error interno al eliminar amistad' });
+  }
+});
+
+// Bloquear usuario: añade a blockedUsers y elimina amistad si existiera
+app.post('/user-block', async (req, res) => {
+  const { blocker, blocked } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(blocker) || !mongoose.Types.ObjectId.isValid(blocked))
+    return res.status(400).json({ error:'ID inválido' });
+  try {
+    await Promise.all([
+      Usuario.findByIdAndUpdate(blocker, { $addToSet: { blockedUsers: blocked }, $pull: { friends: blocked }}),
+      Usuario.findByIdAndUpdate(blocked, { $pull: { friends: blocker }})
+    ]);
+    // Opcional: eliminar solicitudes pendientes
+    await FriendRequest.deleteMany({ $or:[{ from:blocker,to:blocked },{ from:blocked,to:blocker }] });
+    res.json({ message:'Usuario bloqueado' });
+  } catch(err) {
+    console.error('[user-block] error:', err);
+    res.status(500).json({ error:'Error interno al bloquear usuario' });
+  }
+});
+
+// Desbloquear usuario: elimina de blockedUsers
+app.post('/user-unblock', async (req, res) => {
+  const { unblocker, unblocked } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(unblocker) || !mongoose.Types.ObjectId.isValid(unblocked))
+    return res.status(400).json({ error: 'ID inválido' });
+  try {
+    await Usuario.findByIdAndUpdate(unblocker, { $pull: { blockedUsers: unblocked }});
+    res.json({ message: 'Usuario desbloqueado' });
+  } catch(err) {
+    console.error('[user-unblock] error:', err);
+    res.status(500).json({ error:'Error interno al desbloquear usuario' });
+  }
+});
+
+// Obtener lista de amigos
+app.get('/friends', async (req, res) => { /* igual que antes */ });
+
+// Obtener bloqueados
+app.get('/user-blocked', async (req, res) => {
+  const { userId } = req.query;
+  if (!mongoose.Types.ObjectId.isValid(userId))
+    return res.status(400).json({ error:'ID inválido o faltante' });
+  try {
+    const user = await Usuario.findById(userId).populate('blockedUsers', 'nombre apellido apodo _id');
+    res.json({ blocked: user.blockedUsers || [] });
+  } catch(err) {
+    console.error('[user-blocked] error:', err);
+    res.status(500).json({ error:'Error interno al obtener bloqueados' });
   }
 });
 // 404 y errores
