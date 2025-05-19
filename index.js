@@ -71,9 +71,18 @@ const userSchema = new mongoose.Schema({
     library: [{
     cardId:   { type: String, required: true },
     quantity: { type: Number, default: 1 }
-  }]
+  }],
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user'}]
 });
 const Usuario = mongoose.model('user', userSchema);
+//  ADICIÓN: Definición de esquema y modelo para solicitudes de amistad
+const friendRequestSchema = new mongoose.Schema({
+  from:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  to:     { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  status: { type: String, enum: ['pending','accepted','rejected'], default: 'pending' }
+}, { timestamps: true });
+friendRequestSchema.index({ from: 1, to: 1, status: 1 }, { unique: true });
+const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 
 // Registro y verificación
 app.post('/register-request', async (req, res) => {
