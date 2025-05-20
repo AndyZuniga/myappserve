@@ -82,6 +82,52 @@ const friendRequestSchema = new mongoose.Schema({
 friendRequestSchema.index({ from: 1, to: 1, status: 1 }, { unique: true });
 const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 
+// Esquema de notificaciones
+const notificationSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  message: { type: String, required: true },
+  type: { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
+  isRead: { type: Boolean, default: false }
+}, { timestamps: true });
+// Índice para optimizar búsquedas por usuario y estado de lectura
+notificationSchema.index({ user: 1, isRead: 1 });
+const Notification = mongoose.model('notification', notificationSchema);
+
+// Obtener notificaciones de usuario (opcionalmente filtrar por isRead)
+app.get('/notifications', async (req, res) => {
+  const { userId, isRead } = req.query;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const filter = { user: userId };
+  if (isRead === 'false') filter.isRead = false;
+  try {
+    const notis = await Notification.find(filter).sort({ createdAt: -1 });
+    res.json({ notifications: notis });
+  } catch (err) {
+    console.error('[notifications/get] error:', err);
+    res.status(500).json({ error: 'Error interno al obtener notificaciones' });
+  }
+});
+
+// Marcar notificación como leída
+app.patch('/notifications/:id/read', async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const noti = await Notification.findByIdAndUpdate(id, { isRead: true }, { new: true });
+    if (!noti) {
+      return res.status(404).json({ error: 'Notificación no encontrada' });
+    }
+    res.json({ notification: noti });
+  } catch (err) {
+    console.error('[notifications/read] error:', err);
+    res.status(500).json({ error: 'Error interno al marcar como leída' });
+  }
+});
+
 // Registro y verificación
 app.post('/register-request', async (req, res) => {
   const { nombre, apellido, apodo, correo, password } = req.body;
@@ -298,23 +344,24 @@ app.get('/friend-requests', async (req, res) => {
     res.status(500).json({ error: 'Error interno al obtener solicitudes' });
   }
 });
-// Solicitud de amistad revisada: elimina solicitudes previas y crea nueva
+// Solicitud de amistad: enviar y notificar automáticamente
 app.post('/friend-request', async (req, res) => {
   const { from, to } = req.body;
-  // Validaciones iniciales
-  if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to))
+  if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to)) {
     return res.status(400).json({ error: 'ID inválido' });
-  if (from === to) return res.status(400).json({ error: 'No puedes enviarte a ti mismo' });
+  }
+  if (from === to) {
+    return res.status(400).json({ error: 'No puedes enviarte una solicitud a ti mismo' });
+  }
   try {
-    // Eliminar solicitudes existentes en cualquier dirección para permitir reenvío
-    await FriendRequest.deleteMany({
-      $or: [
-        { from, to },
-        { from: to, to: from }
-      ]
-    });
-    // Crear nueva solicitud de amistad
+    // Crear solicitud
+    const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
+    if (exists) {
+      return res.status(400).json({ error: 'Solicitud ya enviada' });
+    }
     const request = await FriendRequest.create({ from, to });
+    // Notificar al receptor
+    await Notification.create({ user: to, message: `Nueva solicitud de amistad de ${from}`, type: 'friend_request' });
     res.json({ request });
   } catch (err) {
     console.error('[friend-request] error:', err);
@@ -322,20 +369,28 @@ app.post('/friend-request', async (req, res) => {
   }
 });
 
-// Aceptar solicitud
+
+// Aceptar solicitud: actualizar y notificar
 app.post('/friend-request/:id/accept', async (req, res) => {
   const { id } = req.params;
-  if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'ID de solicitud inválido' });
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'ID de solicitud inválido' });
+  }
   try {
     const reqDoc = await FriendRequest.findById(id);
-    if (!reqDoc || reqDoc.status !== 'pending') return res.status(404).json({ error: 'Solicitud no encontrada o no pendiente' });
+    if (!reqDoc || reqDoc.status !== 'pending') {
+      return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+    }
     reqDoc.status = 'accepted';
     await reqDoc.save();
     const { from, to } = reqDoc;
+    // Actualizar amigos en ambos usuarios
     await Promise.all([
       Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
+    // Notificar al emisor
+    await Notification.create({ user: from, message: `Tu solicitud fue aceptada por ${to}`, type: 'friend_request' });
     res.json({ message: 'Solicitud aceptada' });
   } catch (err) {
     console.error('[accept-request] error:', err);
@@ -343,15 +398,21 @@ app.post('/friend-request/:id/accept', async (req, res) => {
   }
 });
 
-// Rechazar solicitud
+// Rechazar solicitud: actualizar y notificar
 app.post('/friend-request/:id/reject', async (req, res) => {
   const { id } = req.params;
-  if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'ID de solicitud inválido' });
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'ID de solicitud inválido' });
+  }
   try {
     const reqDoc = await FriendRequest.findById(id);
-    if (!reqDoc || reqDoc.status !== 'pending') return res.status(404).json({ error: 'Solicitud no encontrada o no pendiente' });
+    if (!reqDoc || reqDoc.status !== 'pending') {
+      return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
+    }
     reqDoc.status = 'rejected';
     await reqDoc.save();
+    // Notificar al emisor
+    await Notification.create({ user: reqDoc.from, message: `Tu solicitud fue rechazada por ${reqDoc.to}`, type: 'friend_request' });
     res.json({ message: 'Solicitud rechazada' });
   } catch (err) {
     console.error('[reject-request] error:', err);
