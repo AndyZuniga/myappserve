@@ -335,14 +335,22 @@ app.get('/library', async (req, res) => {
     res.status(500).json({ error: 'Error interno al obtener la bibliotecas' });
   }
 });
-// Obtener todos usuarios
-app.get('/users/all', async (req, res) => {
+app.get('/users/search', async (req, res) => {
+  const { query } = req.query;
+  if (!query) return res.status(400).json({ error: 'Falta query' });
+  const regex = new RegExp(query, 'i');
   try {
-    const users = await Usuario.find().select('nombre apellido apodo correo _id');
+    const users = await Usuario.find({
+      $or: [
+        { nombre:  regex },
+        { apellido: regex },
+        { apodo:   regex }
+      ]
+    }).select('nombre apellido apodo _id correo');
     res.json({ users });
   } catch (err) {
-    console.error('[users/all] error:', err);
-    res.status(500).json({ error: 'Error interno al obtener todos los usuarios' });
+    console.error('[users/search]', err);
+    res.status(500).json({ error: 'Error interno en búsqueda' });
   }
 });
 
@@ -505,9 +513,6 @@ app.post('/user-unblock', async (req, res) => {
     res.status(500).json({ error:'Error interno al desbloquear usuario' });
   }
 });
-
-// Obtener lista de amigos
-app.get('/friends', async (req, res) => { /* igual que antes */ });
 
 // Obtener bloqueados
 app.get('/user-blocked', async (req, res) => {
