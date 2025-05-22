@@ -93,6 +93,22 @@ const notificationSchema = new mongoose.Schema({
 notificationSchema.index({ user: 1, isRead: 1 });
 const Notification = mongoose.model('notification', notificationSchema);
 
+// Crear notificación
+app.post('/notifications', async (req, res) => {
+  const { userId, message, type } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(userId) || !message) {
+    return res.status(400).json({ error: 'Datos inválidos' });
+  }
+  try {
+    const noti = await Notification.create({ user: userId, message, type });
+    res.status(201).json({ notification: noti });
+  } catch (err) {
+    console.error('[notifications/create] error:', err);
+    res.status(500).json({ error: 'Error interno al crear notificación' });
+  }
+});
+
+
 // Obtener notificaciones de usuario (opcionalmente filtrar por isRead)
 app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
