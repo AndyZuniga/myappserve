@@ -82,30 +82,72 @@ const friendRequestSchema = new mongoose.Schema({
 friendRequestSchema.index({ from: 1, to: 1, status: 1 }, { unique: true });
 const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 
-// Esquema de notificaciones con partner para ofertas
+// Esquema de notificaciones con partner, cards y amount para ofertas
 const notificationSchema = new mongoose.Schema({
   user:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
   partner: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },  // Usuario opuesto en oferta
   message: { type: String, required: true },
   type:    { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
-  isRead:  { type: Boolean, default: false }
+  isRead:  { type: Boolean, default: false },
+
+  // Nuevos campos para la oferta
+  cards:   [{ cardId: String, quantity: Number }],
+  amount:  Number
 }, { timestamps: true });
 notificationSchema.index({ user: 1, isRead: 1 });
 const Notification = mongoose.model('notification', notificationSchema);
 
 
+
 // Crear notificación (general)
 app.post('/notifications', async (req, res) => {
-  const { userId, partner, message, type } = req.body;
+  const { userId, partner, message, type, cards, amount } = req.body;
   if (!mongoose.Types.ObjectId.isValid(userId) || !message) {
     return res.status(400).json({ error: 'Datos inválidos' });
   }
   try {
-    const noti = await Notification.create({ user: userId, partner, message, type });
+    const noti = await Notification.create({ user: userId, partner, message, type, cards, amount });
     res.status(201).json({ notification: noti });
   } catch (err) {
     console.error('[notifications/create]', err);
     res.status(500).json({ error: 'Error interno al crear notificación' });
+  }
+});
+
+// Enviar oferta y crear notificaciones
+app.post('/offer', async (req, res) => {
+  const { from, to, cardsArray, offerAmount } = req.body;
+  if (
+    !mongoose.Types.ObjectId.isValid(from) ||
+    !mongoose.Types.ObjectId.isValid(to) ||
+    !Array.isArray(cardsArray) ||
+    !offerAmount
+  ) {
+    return res.status(400).json({ error: 'Datos de oferta inválidos' });
+  }
+  try {
+    const sender = await Usuario.findById(from).select('apodo');
+    const receiver = await Usuario.findById(to).select('apodo');
+    await Notification.create({
+      user:    to,
+      partner: from,
+      message: `Has recibido una oferta de ${sender.apodo}`,
+      type:    'offer',
+      cards:   cardsArray,
+      amount:  parseFloat(offerAmount)
+    });
+    await Notification.create({
+      user:    from,
+      partner: to,
+      message: `Esperando respuesta de ${receiver.apodo}`,
+      type:    'offer',
+      cards:   cardsArray,
+      amount:  parseFloat(offerAmount)
+    });
+    res.status(201).json({ message: 'Oferta enviada y notificaciones creadas' });
+  } catch (err) {
+    console.error('[offer] error:', err);
+    res.status(500).json({ error: 'Error interno al enviar oferta' });
   }
 });
 
