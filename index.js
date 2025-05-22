@@ -82,34 +82,35 @@ const friendRequestSchema = new mongoose.Schema({
 friendRequestSchema.index({ from: 1, to: 1, status: 1 }, { unique: true });
 const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 
-// Esquema de notificaciones
+// Esquema de notificaciones con partner para ofertas
 const notificationSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  user:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  partner: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },  // Usuario opuesto en oferta
   message: { type: String, required: true },
-  type: { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
-  isRead: { type: Boolean, default: false }
+  type:    { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
+  isRead:  { type: Boolean, default: false }
 }, { timestamps: true });
-// Índice para optimizar búsquedas por usuario y estado de lectura
 notificationSchema.index({ user: 1, isRead: 1 });
 const Notification = mongoose.model('notification', notificationSchema);
 
-// Crear notificación
+
+// Crear notificación (general)
 app.post('/notifications', async (req, res) => {
-  const { userId, message, type } = req.body;
+  const { userId, partner, message, type } = req.body;
   if (!mongoose.Types.ObjectId.isValid(userId) || !message) {
     return res.status(400).json({ error: 'Datos inválidos' });
   }
   try {
-    const noti = await Notification.create({ user: userId, message, type });
+    const noti = await Notification.create({ user: userId, partner, message, type });
     res.status(201).json({ notification: noti });
   } catch (err) {
-    console.error('[notifications/create] error:', err);
+    console.error('[notifications/create]', err);
     res.status(500).json({ error: 'Error interno al crear notificación' });
   }
 });
 
 
-// Obtener notificaciones de usuario (opcionalmente filtrar por isRead)
+// Obtener notificaciones de usuario (filtrado y población)
 app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -118,10 +119,22 @@ app.get('/notifications', async (req, res) => {
   const filter = { user: userId };
   if (isRead === 'false') filter.isRead = false;
   try {
-    const notis = await Notification.find(filter).sort({ createdAt: -1 });
-    res.json({ notifications: notis });
+    const notis = await Notification.find(filter)
+      .populate('user', 'nombre apodo')   // remitente
+      .populate('partner', 'nombre apodo') // destinatario en ofertas
+      .sort({ createdAt: -1 });
+
+    // Renombrar campo user -> sender para la respuesta
+    const result = notis.map(n => {
+      const obj = n.toObject();
+      obj.sender = obj.user;
+      delete obj.user;
+      return obj;
+    });
+
+    res.json({ notifications: result });
   } catch (err) {
-    console.error('[notifications/get] error:', err);
+    console.error('[notifications/get]', err);
     res.status(500).json({ error: 'Error interno al obtener notificaciones' });
   }
 });
@@ -134,13 +147,11 @@ app.patch('/notifications/:id/read', async (req, res) => {
   }
   try {
     const noti = await Notification.findByIdAndUpdate(id, { isRead: true }, { new: true });
-    if (!noti) {
-      return res.status(404).json({ error: 'Notificación no encontrada' });
-    }
+    if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
     res.json({ notification: noti });
   } catch (err) {
-    console.error('[notifications/read] error:', err);
-    res.status(500).json({ error: 'Error interno al marcar como leída' });
+    console.error('[notifications/read]', err);
+    res.status(500).json({ error: 'Error interno al marcar notificación' });
   }
 });
 
