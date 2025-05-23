@@ -23,6 +23,23 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+// --- Modelo para historial de ofertas ---
+const offerSchema = new mongoose.Schema({
+  sellerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // quien hace la oferta
+  buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // destinatario
+  buyerName:  { type: String, required: true },                                    // nombre del comprador
+  amount:     { type: Number, required: true },                                    // monto total de la oferta
+  date:       { type: Date, default: Date.now },                                   // fecha de creación
+  cards: [
+    {
+      cardId:    { type: String, required: true },                                // ID de carta
+      quantity:  { type: Number, required: true },                                // cantidad ofertada
+      unitPrice: { type: Number, required: true }                                 // precio unitario
+    }
+  ]
+});
+const Offer = mongoose.model('offer', offerSchema);
+
 // --- Envío de enlaces de verificación ---
 const sendVerificationLink = async (correo, token) => {
   const link = `https://myappserve-go.onrender.com/open-app?token=${token}`;
@@ -578,6 +595,44 @@ app.get('/user-blocked', async (req, res) => {
   } catch(err) {
     console.error('[user-blocked] error:', err);
     res.status(500).json({ error:'Error interno al obtener bloqueados' });
+  }
+});
+
+// --- Nuevo endpoint para historial de ofertas ---
+// Guardar nueva oferta en base de datos
+app.post('/api/offers', async (req, res) => {
+  const { sellerId, buyerId, buyerName, amount, date, cards } = req.body;
+  if (
+    !mongoose.Types.ObjectId.isValid(sellerId) ||
+    !mongoose.Types.ObjectId.isValid(buyerId) ||
+    !Array.isArray(cards) ||
+    typeof amount !== 'number'
+  ) {
+    return res.status(400).json({ error: 'Datos de oferta inválidos' });
+  }
+  try {
+    const offer = new Offer({ sellerId, buyerId, buyerName, amount, date, cards });
+    await offer.save();
+    res.status(201).json({ offer });
+  } catch (err) {
+    console.error('[offers/create]', err);
+    res.status(500).json({ error: 'Error interno al guardar oferta' });
+  }
+});
+
+// Obtener historial de ofertas de un usuario
+app.get('/api/offers', async (req, res) => {
+  const { userId } = req.query;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID de usuario inválido' });
+  }
+  try {
+    const offers = await Offer.find({ sellerId: userId })
+      .sort({ date: -1 });
+    res.json({ offers });
+  } catch (err) {
+    console.error('[offers/get]', err);
+    res.status(500).json({ error: 'Error interno al obtener historial' });
   }
 });
 // 404 y errores
