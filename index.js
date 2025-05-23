@@ -614,10 +614,10 @@ app.post('/api/offers', async (req, res) => {
   try {
     const offer = new Offer({ sellerId, buyerId, buyerName, amount, date, cards });
     await offer.save();
-    res.status(201).json({ offer });
+    return res.status(201).json({ offer });
   } catch (err) {
     console.error('[offers/create]', err);
-    res.status(500).json({ error: 'Error interno al guardar oferta' });
+    return res.status(500).json({ error: err.message });
   }
 });
 
