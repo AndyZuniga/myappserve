@@ -622,18 +622,30 @@ app.post('/api/offers', async (req, res) => {
 });
 
 // Obtener historial de ofertas de un usuario
-app.get('/api/offers', async (req, res) => {
-  const { userId } = req.query;
-  if (!mongoose.Types.ObjectId.isValid(userId)) {
-    return res.status(400).json({ error: 'ID de usuario inválido' });
+app.post('/api/offers', async (req, res) => {
+  // 1) Desestructuramos mode junto al resto
+  const { sellerId, buyerId, buyerName, amount, mode, date, cards } = req.body;
+
+  // 2) Validamos que mode exista y sea uno de los valores permitidos
+  if (
+    !mongoose.Types.ObjectId.isValid(sellerId) ||
+    !mongoose.Types.ObjectId.isValid(buyerId) ||
+    typeof amount !== 'number' ||
+    !['trend','low','manual'].includes(mode) ||
+    !Array.isArray(cards)
+  ) {
+    return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
+
   try {
-    const offers = await Offer.find({ sellerId: userId })
-      .sort({ date: -1 });
-    res.json({ offers });
+    // 3) Creamos la oferta incluyendo mode
+    const offer = new Offer({ sellerId, buyerId, buyerName, amount, mode, date, cards });
+    await offer.save();
+    return res.status(201).json({ offer });
   } catch (err) {
-    console.error('[offers/get]', err);
-    res.status(500).json({ error: 'Error interno al obtener historial' });
+    console.error('[offers/create]', err);
+    // Devolvemos el mensaje real para depurar
+    return res.status(500).json({ error: err.message });
   }
 });
 // 404 y errores
