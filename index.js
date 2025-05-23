@@ -29,6 +29,7 @@ const offerSchema = new mongoose.Schema({
   buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // destinatario
   buyerName:  { type: String, required: true },                                    // nombre del comprador
   amount:     { type: Number, required: true },                                    // monto total de la oferta
+  mode:       { type: String, enum: ['trend','low','manual'], required: true },  // nuevo
   date:       { type: Date, default: Date.now },                                   // fecha de creación
   cards: [
     {
