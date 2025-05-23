@@ -23,19 +23,19 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// --- Modelo para historial de ofertas ---
+// === Esquema de Mongoose para historial de ofertas ===
 const offerSchema = new mongoose.Schema({
-  sellerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // quien hace la oferta
-  buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // destinatario
-  buyerName:  { type: String, required: true },                                    // nombre del comprador
-  amount:     { type: Number, required: true },                                    // monto total de la oferta
-  mode:       { type: String, enum: ['trend','low','manual'], required: true },  // nuevo
-  date:       { type: Date, default: Date.now },                                   // fecha de creación
-  cards: [
+  sellerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // ID del vendedor
+  buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // ID del comprador
+  buyerName:  { type: String, required: true },                                      // Nombre visible del comprador
+  amount:     { type: Number, required: true },                                      // Monto total de la oferta
+  mode:       { type: String, enum: ['trend','low','manual'], required: true },       // Modo de cálculo (agregado para inmutabilidad)
+  date:       { type: Date, default: Date.now },                                     // Fecha de creación
+  cards: [  // Detalles de cada carta incluida en la oferta
     {
-      cardId:    { type: String, required: true },                                // ID de carta
-      quantity:  { type: Number, required: true },                                // cantidad ofertada
-      unitPrice: { type: Number, required: true }                                 // precio unitario
+      cardId:    { type: String, required: true },  // ID de la carta
+      quantity:  { type: Number, required: true },  // Cantidad ofertada
+      unitPrice: { type: Number, required: true }   // Precio unitario fijado en ese momento
     }
   ]
 });
@@ -599,54 +599,55 @@ app.get('/user-blocked', async (req, res) => {
   }
 });
 
-// --- Nuevo endpoint para historial de ofertas ---
-// Guardar nueva oferta en base de datos
+// === Nuevo endpoint: guardar historial de ofertas ===
 app.post('/api/offers', async (req, res) => {
-  const { sellerId, buyerId, buyerName, amount, date, cards } = req.body;
-  if (
-    !mongoose.Types.ObjectId.isValid(sellerId) ||
-    !mongoose.Types.ObjectId.isValid(buyerId) ||
-    !Array.isArray(cards) ||
-    typeof amount !== 'number'
-  ) {
-    return res.status(400).json({ error: 'Datos de oferta inválidos' });
-  }
-  try {
-    const offer = new Offer({ sellerId, buyerId, buyerName, amount, date, cards });
-    await offer.save();
-    return res.status(201).json({ offer });
-  } catch (err) {
-    console.error('[offers/create]', err);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// Obtener historial de ofertas de un usuario
-app.post('/api/offers', async (req, res) => {
-  // 1) Desestructuramos mode junto al resto
+  // Desestructuramos también `mode` que es obligatorio en el esquema
   const { sellerId, buyerId, buyerName, amount, mode, date, cards } = req.body;
 
-  // 2) Validamos que mode exista y sea uno de los valores permitidos
+  // Validaciones básicas
   if (
     !mongoose.Types.ObjectId.isValid(sellerId) ||
     !mongoose.Types.ObjectId.isValid(buyerId) ||
     typeof amount !== 'number' ||
-    !['trend','low','manual'].includes(mode) ||
+    !['trend','low','manual'].includes(mode) ||  // Validamos el modo
     !Array.isArray(cards)
   ) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
 
   try {
-    // 3) Creamos la oferta incluyendo mode
+    // Creamos el documento incluyendo `mode`
     const offer = new Offer({ sellerId, buyerId, buyerName, amount, mode, date, cards });
     await offer.save();
     return res.status(201).json({ offer });
   } catch (err) {
     console.error('[offers/create]', err);
-    // Devolvemos el mensaje real para depurar
+    // Devolvemos el mensaje real de error para depuración
     return res.status(500).json({ error: err.message });
   }
+});
+
+// === Endpoint para obtener historial de ofertas de un usuario ===
+app.get('/api/offers', async (req, res) => {
+  const { userId } = req.query;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID de usuario inválido' });
+  }
+  try {
+    // Filtramos por sellerId para obras vendidas por el usuario
+    const offers = await Offer.find({ sellerId: userId }).sort({ date: -1 });
+    return res.json({ offers });
+  } catch (err) {
+    console.error('[offers/get]', err);
+    return res.status(500).json({ error: 'Error interno al obtener historial' });
+  }
+});
+
+// === Manejadores de rutas no encontradas y errores globales ===
+app.use((req, res) => res.status(404).json({ error: `Ruta ${req.method} ${req.originalUrl} no encontrada` }));
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Error interno', mensaje: err.message });
 });
 // 404 y errores
 app.use((req, res) => res.status(404).json({ error:`Ruta ${req.method} ${req.originalUrl} no encontrada` }));
