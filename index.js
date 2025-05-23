@@ -109,7 +109,7 @@ const notificationSchema = new mongoose.Schema({
   isRead:  { type: Boolean, default: false },
 
   // Nuevos campos para la oferta
-  cards:   [{ cardId: String, quantity: Number }],
+  cards: [{cardId:    { type: String, required: true },quantity:  { type: Number, required: true },name:      { type: String },   image:     { type: String } }],
   amount:  Number
 }, { timestamps: true });
 notificationSchema.index({ user: 1, isRead: 1 });
