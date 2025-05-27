@@ -199,21 +199,31 @@ app.get('/notifications', async (req, res) => {
   }
 });
 
-// Marcar notificación como leída
-app.patch('/notifications/:id/read', async (req, res) => {
+// 2025-05-27 18:15: Nuevo endpoint para responder oferta y actualizar estado en la notificación
+app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ error: 'ID inválido' });
+  const { action, byApodo } = req.body;
+  // Validar acción: solo 'accept' o 'reject'
+  if (!['accept','reject'].includes(action)) {
+    return res.status(400).json({ error: 'Acción inválida' });
   }
   try {
-    const noti = await Notification.findByIdAndUpdate(id, { isRead: true }, { new: true });
+    const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
+    // Actualizar mensaje según la acción
+    noti.message = action === 'accept'
+      ? `Tu oferta ha sido aceptada por ${byApodo}`
+      : `Tu oferta ha sido rechazada por ${byApodo}`;
+    // Marcar como no leída para que destaque al volver a consultar
+    noti.isRead = false;
+    await noti.save();
     res.json({ notification: noti });
   } catch (err) {
-    console.error('[notifications/read]', err);
-    res.status(500).json({ error: 'Error interno al marcar notificación' });
+    console.error('[notifications/respond]', err);
+    res.status(500).json({ error: 'Error interno al actualizar notificación' });
   }
 });
+
 
 // Registro y verificación
 app.post('/register-request', async (req, res) => {
