@@ -100,16 +100,24 @@ const friendRequestSchema = new mongoose.Schema({
 friendRequestSchema.index({ from: 1, to: 1, status: 1 }, { unique: true });
 const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 
-// Esquema de notificaciones con partner, cards y amount para ofertas
+// === Esquema de notificaciones con estado para ofertas ===
 const notificationSchema = new mongoose.Schema({
   user:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
-  partner: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },  // Usuario opuesto en oferta
+  partner: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
   message: { type: String, required: true },
   type:    { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
   isRead:  { type: Boolean, default: false },
-
-  // Nuevos campos para la oferta
-  cards: [{cardId:    { type: String, required: true },quantity:  { type: Number, required: true },name:      { type: String },   image:     { type: String } }],
+  status:  { // Campo agregado para reflejar 'pending', 'accepted' o 'rejected'
+    type: String,
+    enum: ['pending','accepted','rejected'],
+    default: 'pending'
+  },
+  cards: [{ // Detalles de las cartas incluidas en la oferta
+    cardId:    { type: String, required: true },
+    quantity:  { type: Number, required: true },
+    name:      { type: String },
+    image:     { type: String }
+  }],
   amount:  Number
 }, { timestamps: true });
 notificationSchema.index({ user: 1, isRead: 1 });
@@ -133,85 +141,96 @@ app.post('/notifications', async (req, res) => {
 });
 
 // Enviar oferta y crear notificaciones
-app.post('/offer', async (req, res) => {
-  const { from, to, cardsArray, offerAmount } = req.body;
-  if (
-    !mongoose.Types.ObjectId.isValid(from) ||
-    !mongoose.Types.ObjectId.isValid(to) ||
-    !Array.isArray(cardsArray) ||
-    !offerAmount
-  ) {
+app.post('/api/offer', authMiddleware, async (req, res) => {
+  const { to, cardsArray, offerAmount } = req.body;
+  const from = req.userId; // Emisor desde token
+
+  if (!mongoose.Types.ObjectId.isValid(to) || !Array.isArray(cardsArray) || !offerAmount) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
   try {
     const sender = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
+
+    // Notificación para receptor
     await Notification.create({
       user:    to,
       partner: from,
       message: `Has recibido una oferta de ${sender.apodo}`,
       type:    'offer',
       cards:   cardsArray,
-      amount:  parseFloat(offerAmount)
+      amount:  parseFloat(offerAmount),
+      status:  'pending' // Valor por defecto, pero explícito aquí
     });
+
+    // Notificación para emisor
     await Notification.create({
       user:    from,
       partner: to,
       message: `Esperando respuesta de ${receiver.apodo}`,
       type:    'offer',
       cards:   cardsArray,
-      amount:  parseFloat(offerAmount)
+      amount:  parseFloat(offerAmount),
+      status:  'pending'
     });
+
     res.status(201).json({ message: 'Oferta enviada y notificaciones creadas' });
   } catch (err) {
-    console.error('[offer] error:', err);
+    console.error('[api/offer] error:', err);
     res.status(500).json({ error: 'Error interno al enviar oferta' });
   }
 });
 
 
+
 // Obtener notificaciones de usuario (filtrado y población)
-app.get('/notifications', async (req, res) => {
-  const { userId, isRead } = req.query;
-  if (!mongoose.Types.ObjectId.isValid(userId)) {
-    return res.status(400).json({ error: 'ID inválido' });
-  }
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+  const userId = req.userId; // Usamos ID del token en lugar de query
+  const { isRead } = req.query;
   const filter = { user: userId };
   if (isRead === 'false') filter.isRead = false;
   try {
     const notis = await Notification.find(filter)
-      .populate('user', 'nombre apodo')   // remitente
-      .populate('partner', 'nombre apodo') // destinatario en ofertas
+      .populate('partner', 'nombre apodo')
       .sort({ createdAt: -1 });
-
-    // Renombrar campo user -> sender para la respuesta
-    const result = notis.map(n => {
-      const obj = n.toObject();
-      obj.sender = obj.user;
-      delete obj.user;
-      return obj;
-    });
-
-    res.json({ notifications: result });
+    res.json({ notifications: notis });
   } catch (err) {
     console.error('[notifications/get]', err);
     res.status(500).json({ error: 'Error interno al obtener notificaciones' });
   }
 });
 
-// Marcar notificación como leída
-app.patch('/notifications/:id/read', async (req, res) => {
+// --- Endpoint para responder a una oferta: actualiza status y notifica al emisor ---
+app.patch('/api/notifications/:id/respond', authMiddleware, async (req, res) => {
   const { id } = req.params;
+  const { action } = req.body; // 'accepted' o 'rejected'
+
+  if (!['accepted','rejected'].includes(action)) {
+    return res.status(400).json({ error: 'Acción inválida' });
+  }
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
+
   try {
-    const noti = await Notification.findByIdAndUpdate(id, { isRead: true }, { new: true });
+    // Actualizamos la notificación del receptor
+    const noti = await Notification.findOneAndUpdate(
+      { _id: id, user: req.userId },
+      { status: action, isRead: true },
+      { new: true }
+    );
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
+
+    // Actualizamos la notificación del emisor (partner)
+    await Notification.updateOne(
+      { user: noti.partner, partner: req.userId, type: 'offer' },
+      { status: action }
+    );
+
     res.json({ notification: noti });
   } catch (err) {
-    console.error('[notifications/read]', err);
-    res.status(500).json({ error: 'Error interno al marcar notificación' });
+    console.error('[notifications/respond]', err);
+    res.status(500).json({ error: 'Error interno al responder oferta' });
   }
 });
 
