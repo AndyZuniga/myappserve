@@ -203,19 +203,24 @@ app.get('/notifications', async (req, res) => {
 app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
   const { action, byApodo } = req.body;
-  // Validar acción: solo 'accept' o 'reject'
   if (!['accept','reject'].includes(action)) {
     return res.status(400).json({ error: 'Acción inválida' });
   }
   try {
     const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
+
     // Actualizar mensaje según la acción
     noti.message = action === 'accept'
       ? `Tu oferta ha sido aceptada por ${byApodo}`
       : `Tu oferta ha sido rechazada por ${byApodo}`;
-    // Marcar como no leída para que destaque al volver a consultar
+
+    // Marcar como no leída
     noti.isRead = false;
+
+    // ⚡ Forzar actualización de createdAt para que el cliente lo considere la notificación más reciente
+    noti.createdAt = new Date();
+
     await noti.save();
     res.json({ notification: noti });
   } catch (err) {
