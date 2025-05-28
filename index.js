@@ -103,16 +103,17 @@ const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 // Esquema de notificaciones con partner, cards y amount para ofertas
 const notificationSchema = new mongoose.Schema({
   user:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
-  partner: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },  // Usuario opuesto en oferta
+  partner: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
   message: { type: String, required: true },
   type:    { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
   isRead:  { type: Boolean, default: false },
-
-  // Nuevos campos para la oferta
-  cards: [{cardId:    { type: String, required: true },quantity:  { type: Number, required: true },name:      { type: String },   image:     { type: String } }],
+  status:  { type: String, enum: ['pendiente', 'aceptada', 'rechazada'], default: 'pendiente' },
+  cards:   [{ cardId: { type: String, required: true }, quantity: { type: Number, required: true }, name: String, image: String }],
   amount:  Number
 }, { timestamps: true });
+
 notificationSchema.index({ user: 1, isRead: 1 });
+
 const Notification = mongoose.model('notification', notificationSchema);
 
 
@@ -199,35 +200,65 @@ app.get('/notifications', async (req, res) => {
   }
 });
 
+
+
 // 2025-05-27 18:15: Nuevo endpoint para responder oferta y actualizar estado en la notificación
 app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
   const { action, byApodo } = req.body;
-  if (!['accept','reject'].includes(action)) {
+
+  if (!['accept', 'reject'].includes(action)) {
     return res.status(400).json({ error: 'Acción inválida' });
   }
+
+  const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
+  const newMessage = action === 'accept'
+    ? `Tu oferta ha sido aceptada por ${byApodo}`
+    : `Tu oferta ha sido rechazada por ${byApodo}`;
+
   try {
+    // Buscar la notificación original por ID
     const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
 
-    // Actualizar mensaje según la acción
-    noti.message = action === 'accept'
-      ? `Tu oferta ha sido aceptada por ${byApodo}`
-      : `Tu oferta ha sido rechazada por ${byApodo}`;
-
-    // Marcar como no leída
+    // Actualizar la notificación del receptor (la que corresponde al ID)
+    noti.message = newMessage;
+    noti.status = newStatus;
     noti.isRead = false;
-
-    // ⚡ Forzar actualización de createdAt para que el cliente lo considere la notificación más reciente
     noti.createdAt = new Date();
-
     await noti.save();
-    res.json({ notification: noti });
+
+    // Buscar la notificación paralela del emisor (si existe)
+    const counterpart = await Notification.findOne({
+      user: noti.partner,
+      partner: noti.user,
+      type: 'offer',
+      amount: noti.amount,
+      'cards.cardId': { $in: noti.cards.map(c => c.cardId) },
+    });
+
+    if (counterpart) {
+      counterpart.message = newMessage;
+      counterpart.status = newStatus;
+      counterpart.isRead = false;
+      counterpart.createdAt = new Date();
+      await counterpart.save();
+    }
+
+    // Respuesta con ambas IDs y sus nuevos estados
+    res.json({
+      message: `Notificación(es) actualizada(s) a estado '${newStatus}'`,
+      updated: {
+        receptor: { id: noti._id, status: noti.status },
+        emisor: counterpart ? { id: counterpart._id, status: counterpart.status } : null
+      }
+    });
   } catch (err) {
     console.error('[notifications/respond]', err);
     res.status(500).json({ error: 'Error interno al actualizar notificación' });
   }
 });
+
 
 
 // Registro y verificación
