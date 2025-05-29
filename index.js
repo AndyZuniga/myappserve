@@ -202,49 +202,43 @@ app.get('/notifications', async (req, res) => {
 
 
 
-// PATCH /notifications/respond-multiple
-app.patch('/notifications/respond-multiple', async (req, res) => {
+// Ruta PATCH /notifications/respond-multiple
+router.patch('/notifications/respond-multiple', async (req, res) => {
   try {
     const { receptorId, emisorId, action, receptorName, emisorName } = req.body;
 
     if (!receptorId || !emisorId || !action || !receptorName || !emisorName) {
-      return res.status(400).json({ error: 'Faltan parámetros requeridos.' });
+      return res.status(400).json({ error: 'Faltan datos requeridos' });
     }
 
-    let messageForReceptor = '';
-    let messageForEmisor = '';
+    const messageReceptor =
+      action === 'accept'
+        ? `Aceptaste la oferta de ${emisorName}`
+        : `Rechazaste la oferta de ${emisorName}`;
 
-    if (action === 'accept') {
-      messageForReceptor = `Aceptaste la oferta de ${emisorName}`;
-      messageForEmisor = `${receptorName} aceptó tu oferta`;
-    } else if (action === 'reject') {
-      messageForReceptor = `Rechazaste la oferta de ${emisorName}`;
-      messageForEmisor = `${receptorName} rechazó tu oferta`;
-    } else {
-      return res.status(400).json({ error: 'Acción inválida.' });
-    }
+    const messageEmisor =
+      action === 'accept'
+        ? `${receptorName} aceptó tu oferta`
+        : `${receptorName} rechazó tu oferta`;
 
-    // Actualizar notificación del receptor
+    const update = { $set: { message: '', isRead: false } };
+
+    // Actualiza la notificación del receptor
     await Notification.findByIdAndUpdate(receptorId, {
-      message: messageForReceptor,
-      isRead: true,
-      status: action,
+      $set: { message: messageReceptor, isRead: false },
     });
 
-    // Actualizar notificación del emisor
+    // Actualiza la notificación del emisor
     await Notification.findByIdAndUpdate(emisorId, {
-      message: messageForEmisor,
-      isRead: false,
-      status: action,
+      $set: { message: messageEmisor, isRead: false },
     });
 
-    return res.status(200).json({ ok: true, updated: [receptorId, emisorId] });
-  } catch (error) {
-    console.error('PATCH /notifications/respond-multiple:', error);
-    res.status(500).json({ error: 'Error al actualizar notificaciones' });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Error en respond-multiple:', err);
+    return res.status(500).json({ error: 'Error al actualizar notificaciones' });
   }
 });
-
 
 
 
