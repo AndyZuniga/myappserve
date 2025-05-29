@@ -136,6 +136,7 @@ app.post('/notifications', async (req, res) => {
 // Enviar oferta y crear notificaciones
 app.post('/offer', async (req, res) => {
   const { from, to, cardsArray, offerAmount } = req.body;
+
   if (
     !mongoose.Types.ObjectId.isValid(from) ||
     !mongoose.Types.ObjectId.isValid(to) ||
@@ -144,9 +145,16 @@ app.post('/offer', async (req, res) => {
   ) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
+
+  if (from === to) {
+    return res.status(400).json({ error: 'No puedes hacer una oferta a ti mismo' });
+  }
+
   try {
     const sender = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
+
+    // Notificación para el receptor
     await Notification.create({
       user:    to,
       partner: from,
@@ -155,20 +163,24 @@ app.post('/offer', async (req, res) => {
       cards:   cardsArray,
       amount:  parseFloat(offerAmount)
     });
+
+    // Notificación para el emisor
     await Notification.create({
       user:    from,
       partner: to,
-      message: `Esperando respuesta de ${receiver.apodo}`,
+      message: `Tu oferta fue enviada a ${receiver.apodo}`,
       type:    'offer',
       cards:   cardsArray,
       amount:  parseFloat(offerAmount)
     });
+
     res.status(201).json({ message: 'Oferta enviada y notificaciones creadas' });
   } catch (err) {
     console.error('[offer] error:', err);
     res.status(500).json({ error: 'Error interno al enviar oferta' });
   }
 });
+
 
 
 // Obtener notificaciones de usuario (filtrado y población)
@@ -653,7 +665,6 @@ app.post('/api/offers', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
-
 // === Endpoint para obtener historial de ofertas de un usuario ===
 app.get('/api/offers', async (req, res) => {
   const { userId } = req.query;
