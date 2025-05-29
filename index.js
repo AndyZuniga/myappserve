@@ -202,62 +202,49 @@ app.get('/notifications', async (req, res) => {
 
 
 
-// 2025-05-27 18:15: Nuevo endpoint para responder oferta y actualizar estado en la notificación
-app.patch('/notifications/:id/respond', async (req, res) => {
-  const { id } = req.params;
-  const { action, byApodo } = req.body;
-
-  if (!['accept', 'reject'].includes(action)) {
-    return res.status(400).json({ error: 'Acción inválida' });
-  }
-
-  const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
-  const newMessage = action === 'accept'
-    ? `Tu oferta ha sido aceptada por ${byApodo}`
-    : `Tu oferta ha sido rechazada por ${byApodo}`;
-
+// PATCH /notifications/respond-multiple
+app.patch('/notifications/respond-multiple', async (req, res) => {
   try {
-    // Buscar la notificación original por ID
-    const noti = await Notification.findById(id);
-    if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
+    const { receptorId, emisorId, action, receptorName, emisorName } = req.body;
 
-    // Actualizar la notificación del receptor (la que corresponde al ID)
-    noti.message = newMessage;
-    noti.status = newStatus;
-    noti.isRead = false;
-    noti.createdAt = new Date();
-    await noti.save();
-
-    // Buscar la notificación paralela del emisor (si existe)
-    const counterpart = await Notification.findOne({
-      user: noti.partner,
-      partner: noti.user,
-      type: 'offer',
-      amount: noti.amount,
-      'cards.cardId': { $in: noti.cards.map(c => c.cardId) },
-    });
-
-    if (counterpart) {
-      counterpart.message = newMessage;
-      counterpart.status = newStatus;
-      counterpart.isRead = false;
-      counterpart.createdAt = new Date();
-      await counterpart.save();
+    if (!receptorId || !emisorId || !action || !receptorName || !emisorName) {
+      return res.status(400).json({ error: 'Faltan parámetros requeridos.' });
     }
 
-    // Respuesta con ambas IDs y sus nuevos estados
-    res.json({
-      message: `Notificación(es) actualizada(s) a estado '${newStatus}'`,
-      updated: {
-        receptor: { id: noti._id, status: noti.status },
-        emisor: counterpart ? { id: counterpart._id, status: counterpart.status } : null
-      }
+    let messageForReceptor = '';
+    let messageForEmisor = '';
+
+    if (action === 'accept') {
+      messageForReceptor = `Aceptaste la oferta de ${emisorName}`;
+      messageForEmisor = `${receptorName} aceptó tu oferta`;
+    } else if (action === 'reject') {
+      messageForReceptor = `Rechazaste la oferta de ${emisorName}`;
+      messageForEmisor = `${receptorName} rechazó tu oferta`;
+    } else {
+      return res.status(400).json({ error: 'Acción inválida.' });
+    }
+
+    // Actualizar notificación del receptor
+    await Notification.findByIdAndUpdate(receptorId, {
+      message: messageForReceptor,
+      isRead: true,
+      status: action,
     });
-  } catch (err) {
-    console.error('[notifications/respond]', err);
-    res.status(500).json({ error: 'Error interno al actualizar notificación' });
+
+    // Actualizar notificación del emisor
+    await Notification.findByIdAndUpdate(emisorId, {
+      message: messageForEmisor,
+      isRead: false,
+      status: action,
+    });
+
+    return res.status(200).json({ ok: true, updated: [receptorId, emisorId] });
+  } catch (error) {
+    console.error('PATCH /notifications/respond-multiple:', error);
+    res.status(500).json({ error: 'Error al actualizar notificaciones' });
   }
 });
+
 
 
 
