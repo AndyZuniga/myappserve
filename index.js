@@ -202,7 +202,9 @@ app.get('/notifications', async (req, res) => {
 
 
 
-// 2025-05-27 18:15: Nuevo endpoint para responder oferta y actualizar estado en la notificación
+// =============================================
+// Endpoint para responder oferta y actualizar estado
+// =============================================
 app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
   const { action, byApodo } = req.body;
@@ -212,23 +214,24 @@ app.patch('/notifications/:id/respond', async (req, res) => {
   }
 
   const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
-  const newMessage = action === 'accept'
-    ? `Tu oferta ha sido aceptada por ${byApodo}`
-    : `Tu oferta ha sido rechazada por ${byApodo}`;
 
   try {
-    // Buscar la notificación original por ID
+    // 1. Actualizar la notificación original (receptor)
     const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
 
-    // Actualizar la notificación del receptor (la que corresponde al ID)
-    noti.message = newMessage;
+    // Construir mensaje distinto según rol
+    // El receptor es quien recibe la acción (id coincide)
+    const receptorMessage = action === 'accept'
+      ? `Has aceptado la oferta de ${byApodo}`
+      : `Rechazaste la oferta de ${byApodo}`;
+    noti.message = receptorMessage;
     noti.status = newStatus;
     noti.isRead = false;
     noti.createdAt = new Date();
     await noti.save();
 
-    // Buscar la notificación paralela del emisor (si existe)
+    // 2. Actualizar la notificación de la contraparte (emisor)
     const counterpart = await Notification.findOne({
       user: noti.partner,
       partner: noti.user,
@@ -238,15 +241,18 @@ app.patch('/notifications/:id/respond', async (req, res) => {
     });
 
     if (counterpart) {
-      counterpart.message = newMessage;
+      const emisorMessage = action === 'accept'
+        ? `Tu oferta ha sido aceptada por ${byApodo}`
+        : `Tu oferta ha sido rechazada por ${byApodo}`;
+      counterpart.message = emisorMessage;
       counterpart.status = newStatus;
       counterpart.isRead = false;
       counterpart.createdAt = new Date();
       await counterpart.save();
     }
 
-    // Respuesta con ambas IDs y sus nuevos estados
-    res.json({
+    // 3. Responder con detalles
+    return res.json({
       message: `Notificación(es) actualizada(s) a estado '${newStatus}'`,
       updated: {
         receptor: { id: noti._id, status: noti.status },
@@ -255,7 +261,7 @@ app.patch('/notifications/:id/respond', async (req, res) => {
     });
   } catch (err) {
     console.error('[notifications/respond]', err);
-    res.status(500).json({ error: 'Error interno al actualizar notificación' });
+    return res.status(500).json({ error: 'Error interno al actualizar notificación' });
   }
 });
 
