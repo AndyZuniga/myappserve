@@ -458,7 +458,6 @@ app.get('/library', async (req, res) => {
     res.status(500).json({ error: 'Error interno al obtener la bibliotecas' });
   }
 });
-//buscar weones
 app.get('/users/search', async (req, res) => {
   const { query } = req.query;
   if (!query) return res.status(400).json({ error: 'Falta query' });
@@ -501,50 +500,24 @@ app.post('/friend-request', async (req, res) => {
   if (from === to) {
     return res.status(400).json({ error: 'No puedes enviarte una solicitud a ti mismo' });
   }
-
   try {
-    // Evitar solicitudes duplicadas pendientes
+    // Crear solicitud
     const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
     if (exists) {
       return res.status(400).json({ error: 'Solicitud ya enviada' });
     }
-
-    // 1. Crear la solicitud en la BD
     const request = await FriendRequest.create({ from, to });
-
-    // 2. Obtener datos básicos del emisor y receptor para el mensaje
-    const sender = await Usuario.findById(from).select('nombre apellido apodo');
-    const receiver = await Usuario.findById(to).select('nombre apellido apodo');
-
-    // 3. Crear notificación para el receptor (como antes)
-    await Notification.create({
-      user: to,
-      partner: from,
-      message: `Nueva solicitud de amistad de ${sender.apodo}`,
-      type: 'friend_request',
-      status: 'pending'       // se guarda como pendiente
-      // createdAt se genera automáticamente
-    });
-
-    // 4. Crear notificación para el emisor
-    await Notification.create({
-      user: from,
-      partner: to,
-      message: `Enviaste una solicitud a ${receiver.nombre} ${receiver.apellido}`,
-      type: 'friend_request',
-      status: 'pending'       // inicio como pendiente
-      // createdAt se genera automáticamente
-    });
-
-    return res.json({ request });
+    // Notificar al receptor
+    await Notification.create({ user: to, message: `Nueva solicitud de amistad de ${from}`, type: 'friend_request' });
+    res.json({ request });
   } catch (err) {
     console.error('[friend-request] error:', err);
-    return res.status(500).json({ error: 'Error interno al enviar solicitud' });
+    res.status(500).json({ error: 'Error interno al enviar solicitud' });
   }
 });
 
 
-// RUTA ORIGINAL DE ACEPTAR SOLICITUD
+// Aceptar solicitud: actualizar y notificar
 app.post('/friend-request/:id/accept', async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -555,47 +528,22 @@ app.post('/friend-request/:id/accept', async (req, res) => {
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
-
-    // 1. Cambiar estado de la solicitud
     reqDoc.status = 'accepted';
     await reqDoc.save();
     const { from, to } = reqDoc;
-
-    // 2. Actualizar listas de amigos
+    // Actualizar amigos en ambos usuarios
     await Promise.all([
       Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
-
-    // 3. Actualizar notificación del emisor
-    // Buscamos la notificación que creamos cuando envió la solicitud
-    await Notification.findOneAndUpdate(
-      { user: from, partner: to, type: 'friend_request', status: 'pending' },
-      {
-        message: `Tu solicitud fue aceptada por ${to}`, 
-        status: 'accepted',
-        createdAt: new Date()    // actualizamos la fecha a la de aceptación
-      }
-    );
-
-    // 4. Crear notificación para el receptor informando aceptación
-    await Notification.create({
-      user: to,
-      partner: from,
-      message: `Has aceptado la solicitud de amistad de ${from}`,
-      type: 'friend_request',
-      status: 'accepted'
-      // createdAt se genera automáticamente
-    });
-
-    return res.json({ message: 'Solicitud aceptada' });
+    // Notificar al emisor
+    await Notification.create({ user: from, message: `Tu solicitud fue aceptada por ${to}`, type: 'friend_request' });
+    res.json({ message: 'Solicitud aceptada' });
   } catch (err) {
     console.error('[accept-request] error:', err);
-    return res.status(500).json({ error: 'Error interno al aceptar solicitud' });
+    res.status(500).json({ error: 'Error interno al aceptar solicitud' });
   }
 });
-
-
 
 // Rechazar solicitud: actualizar y notificar
 app.post('/friend-request/:id/reject', async (req, res) => {
@@ -610,34 +558,14 @@ app.post('/friend-request/:id/reject', async (req, res) => {
     }
     reqDoc.status = 'rejected';
     await reqDoc.save();
-    const { from, to } = reqDoc;
-
-    // 1. Actualizar notificación del emisor
-    await Notification.findOneAndUpdate(
-      { user: from, partner: to, type: 'friend_request', status: 'pending' },
-      {
-        message: `Tu solicitud fue rechazada por ${to}`,
-        status: 'rejected',
-        createdAt: new Date()
-      }
-    );
-
-    // 2. Crear notificación para el receptor informando rechazo
-    await Notification.create({
-      user: to,
-      partner: from,
-      message: `Has rechazado la solicitud de amistad de ${from}`,
-      type: 'friend_request',
-      status: 'rejected'
-    });
-
-    return res.json({ message: 'Solicitud rechazada' });
+    // Notificar al emisor
+    await Notification.create({ user: reqDoc.from, message: `Tu solicitud fue rechazada por ${reqDoc.to}`, type: 'friend_request' });
+    res.json({ message: 'Solicitud rechazada' });
   } catch (err) {
     console.error('[reject-request] error:', err);
-    return res.status(500).json({ error: 'Error interno al rechazar solicitud' });
+    res.status(500).json({ error: 'Error interno al rechazar solicitud' });
   }
 });
-
 
 // Obtener lista de amigos
 app.get('/friends', async (req, res) => {
