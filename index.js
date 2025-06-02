@@ -87,7 +87,12 @@ const userSchema = new mongoose.Schema({
   verificado:   { type: Boolean, default: true },
   tokenReset:   String,
   tokenExpira:  Date,
-  library: [{cardId:   { type: String, required: true },quantity: { type: Number, default: 1 }}],
+  library: [
+    {
+      cardId:   { type: String, required: true },
+      quantity: { type: Number, default: 1 }
+    }
+  ],
   friends:      [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],  
   blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }]   
 });
