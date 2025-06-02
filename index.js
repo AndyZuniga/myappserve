@@ -547,50 +547,46 @@ app.post('/friend-request', async (req, res) => {
 });
 
 
-
-
 // RUTA ORIGINAL DE ACEPTAR SOLICITUD
 app.post('/friend-request/:id/accept', async (req, res) => {
   const { id } = req.params;
+
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
+
   try {
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-    // 1. Cambiar estado de la solicitud
     reqDoc.status = 'accepted';
     await reqDoc.save();
+
     const { from, to } = reqDoc;
 
-    // 2. Actualizar listas de amigos
     await Promise.all([
       Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
 
-    // 3. Actualizar notificación del emisor
-    // Buscamos la notificación que creamos cuando envió la solicitud
     await Notification.findOneAndUpdate(
-      { user: from, partner: to, type: 'friend_request', status: 'pending' },
+      { user: from, partner: to, type: 'friend_request', status: 'pendiente' },
       {
-        message: `Tu solicitud fue aceptada por ${to}`, 
-        status: 'accepted',
-        createdAt: new Date()    // actualizamos la fecha a la de aceptación
-      }
+        message:   `Tu solicitud fue aceptada por ${to}`,
+        status:    'aceptada',
+        createdAt: new Date()
+      },
+      { new: true }
     );
 
-    // 4. Crear notificación para el receptor informando aceptación
     await Notification.create({
-      user: to,
+      user:    to,
       partner: from,
       message: `Has aceptado la solicitud de amistad de ${from}`,
-      type: 'friend_request',
-      status: 'accepted'
-      // createdAt se genera automáticamente
+      type:    'friend_request',
+      status:  'aceptada'
     });
 
     return res.json({ message: 'Solicitud aceptada' });
@@ -602,6 +598,7 @@ app.post('/friend-request/:id/accept', async (req, res) => {
 
 
 
+//eliminar weiones
 app.post('/friend-request/:id/reject', async (req, res) => {
   const { id } = req.params;
 
