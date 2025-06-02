@@ -26,17 +26,17 @@ const transporter = nodemailer.createTransport({
 
 // === Esquema de Mongoose para historial de ofertas ===
 const offerSchema = new mongoose.Schema({
-  sellerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // ID del vendedor
-  buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // ID del comprador
-  buyerName:  { type: String, required: true },                                      // Nombre visible del comprador
-  amount:     { type: Number, required: true },                                      // Monto total de la oferta
-  mode:       { type: String, enum: ['trend','low','manual'], required: true },       // Modo de cálculo (agregado para inmutabilidad)
-  date:       { type: Date, default: Date.now },                                     // Fecha de creación
-  cards: [                                                                             // Detalles de cada carta incluida en la oferta
+  sellerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  buyerName:  { type: String, required: true },
+  amount:     { type: Number, required: true },
+  mode:       { type: String, enum: ['trend','low','manual'], required: true },
+  date:       { type: Date, default: Date.now },
+  cards: [
     {
-      cardId:    { type: String, required: true },  // ID de la carta
-      quantity:  { type: Number, required: true },  // Cantidad ofertada
-      unitPrice: { type: Number, required: true }   // Precio unitario fijado en ese momento
+      cardId:    { type: String, required: true },
+      quantity:  { type: Number, required: true },
+      unitPrice: { type: Number, required: true }
     }
   ]
 });
@@ -93,8 +93,8 @@ const userSchema = new mongoose.Schema({
       quantity: { type: Number, default: 1 }
     }
   ],
-  friends:      [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],  // lista de amigos
-  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }]   // usuarios bloqueados
+  friends:      [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],  
+  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }]   
 });
 const Usuario = mongoose.model('user', userSchema);
 
@@ -111,7 +111,7 @@ const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 const notificationSchema = new mongoose.Schema({
   user:            { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
   partner:         { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
-  friendRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'friend_request' }, // Nuevo campo
+  friendRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'friend_request' }, 
   message:         { type: String, required: true },
   type:            { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
   isRead:          { type: Boolean, default: false },
@@ -162,11 +162,9 @@ app.post('/offer', async (req, res) => {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
   try {
-    // Obtener apodos para los mensajes
     const sender = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
 
-    // Notificación para el receptor de la oferta
     await Notification.create({
       user:    to,
       partner: from,
@@ -176,7 +174,6 @@ app.post('/offer', async (req, res) => {
       amount:  parseFloat(offerAmount)
     });
 
-    // Notificación para el emisor de la oferta
     await Notification.create({
       user:    from,
       partner: to,
@@ -205,19 +202,11 @@ app.get('/notifications', async (req, res) => {
   if (isRead === 'false') filter.isRead = false;
 
   try {
-    // Encontrar notificaciones y poblar partner (y cantidad opcional de sender)
     const notis = await Notification.find(filter)
       .populate('partner', 'nombre apodo')
       .sort({ createdAt: -1 });
 
-    // Opcional: Renombrar campo user -> sender para que en el frontend lo reciba como sender
-    const result = notis.map(n => {
-      const obj = n.toObject();
-      // no hacemos .populate('user'), porque en esta ruta user es siempre el receptor
-      // pero si quisieras, podrías poblar también "user" y renombrarlo
-      return obj;
-    });
-
+    const result = notis.map(n => n.toObject());
     res.json({ notifications: result });
   } catch (err) {
     console.error('[notifications/get]', err);
@@ -241,11 +230,9 @@ app.patch('/notifications/:id/respond', async (req, res) => {
   const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
 
   try {
-    // 1. Actualizar la notificación original (receptor)
     const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
 
-    // Construir mensaje distinto según rol
     const receptorMessage = action === 'accept'
       ? `Has aceptado la oferta de ${byApodo}`
       : `Rechazaste la oferta de ${byApodo}`;
@@ -255,7 +242,6 @@ app.patch('/notifications/:id/respond', async (req, res) => {
     noti.createdAt = new Date();
     await noti.save();
 
-    // 2. Actualizar la notificación de la contraparte (emisor)
     const counterpart = await Notification.findOne({
       user: noti.partner,
       partner: noti.user,
@@ -567,30 +553,27 @@ app.post('/friend-request', async (req, res) => {
 
     // 4) Crear el documento en la colección friend_requests
     const request = await FriendRequest.create({ from, to });
-    // En este punto, request._id es el ID de la nueva solicitud creada.
 
-    // 5) Obtener nombre/apodo del emisor (from) y del receptor (to)
+    // 5) Obtener nombre/apodo del emisor y del receptor
     const userFrom = await Usuario.findById(from).select('nombre apodo');
     const userTo   = await Usuario.findById(to).select('nombre apodo');
 
-    // 6) Crear la notificación para el receptor (user: to)
-    //    Se envía partner: from para referenciar quién inició la solicitud.
+    // 6) Crear la notificación para el receptor (B)
     await Notification.create({
-      user:            to,                           // A quién va dirigida la notificación
-      partner:         from,                         // Quién envía la solicitud
-      friendRequestId: request._id,                  // Guardamos el ID de la solicitud aquí
-      message:         `Nueva solicitud de amistad de ${userFrom.nombre}`, 
+      user:            to,
+      partner:         from,
+      friendRequestId: request._id,
+      message:         `Nueva solicitud de amistad de ${userFrom.nombre}`,
       type:            'friend_request',
       status:          'pendiente'
     });
 
-    // 7) Crear la notificación para el emisor (user: from)
-    //    Esto le permitirá al emisor ver “Enviaste una solicitud a X” con estado “pendiente”.
+    // 7) Crear la notificación para el emisor (A)
     await Notification.create({
-      user:            from,                         // A quién va dirigida esta notificación (el que envía)
-      partner:         to,                           // Quién recibe la solicitud
-      friendRequestId: request._id,                  // Mismo ID de solicitud
-      message:         `Enviaste una solicitud a ${userTo.nombre}`, 
+      user:            from,
+      partner:         to,
+      friendRequestId: request._id,
+      message:         `Enviaste una solicitud a ${userTo.nombre}`,
       type:            'friend_request',
       status:          'pendiente'
     });
@@ -631,17 +614,17 @@ app.post('/friend-request/:id/accept', async (req, res) => {
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
 
-    // Obtener datos de nombre/apodo para los mensajes
+    // Obtener datos de nombre/apodo
     const userFrom = await Usuario.findById(from).select('nombre apodo');
     const userTo   = await Usuario.findById(to).select('nombre apodo');
 
-    // Actualizar la notificación del emisor (user: from)
+    // 1) Actualizar la notificación del emisor (A)
     await Notification.findOneAndUpdate(
       { 
-        user: from, 
-        partner: to, 
-        type: 'friend_request', 
-        status: 'pendiente',
+        user:            from, 
+        partner:         to, 
+        type:            'friend_request', 
+        status:          'pendiente',
         friendRequestId: id 
       },
       {
@@ -653,17 +636,25 @@ app.post('/friend-request/:id/accept', async (req, res) => {
       { new: true }
     );
 
-    // Crear nueva notificación para el receptor (user: to)
-    await Notification.create({
-      user:            to,
-      partner:         from,
-      friendRequestId: id,
-      message:         `Has aceptado la solicitud de amistad de ${userFrom.nombre}`,
-      type:            'friend_request',
-      status:          'aceptada'
-    });
+    // 2) ***EN VEZ DE CREAR UNA NUEVA NOTIFICACIÓN PARA B***, ACTUALIZAMOS LA YA EXISTENTE
+    await Notification.findOneAndUpdate(
+      {
+        user:            to,
+        partner:         from,
+        type:            'friend_request',
+        status:          'pendiente',
+        friendRequestId: id
+      },
+      {
+        message:   `Has aceptado la solicitud de amistad de ${userFrom.nombre}`,
+        status:    'aceptada',
+        isRead:    false,
+        createdAt: new Date()
+      },
+      { new: true }
+    );
 
-    return res.json({ message: 'Solicitud aceptada' });
+    return res.json({ message: 'Solicitud aceptada y notificaciones actualizadas' });
   } catch (err) {
     console.error('[accept-request] error:', err);
     return res.status(500).json({ error: 'Error interno al aceptar solicitud' });
@@ -676,19 +667,17 @@ app.post('/friend-request/:id/accept', async (req, res) => {
 app.post('/friend-request/:id/reject', async (req, res) => {
   const { id } = req.params;
 
-  // 1) Validar ID de solicitud
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
 
   try {
-    // 2) Buscar y verificar estado pending
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-    // 3) Cambiar estado a 'rejected'
+    // Cambiar estado a 'rejected'
     reqDoc.status = 'rejected';
     await reqDoc.save();
 
@@ -698,7 +687,7 @@ app.post('/friend-request/:id/reject', async (req, res) => {
     const userFrom = await Usuario.findById(from).select('nombre apodo');
     const userTo   = await Usuario.findById(to).select('nombre apodo');
 
-    // 4) Actualizar la notificación del emisor (user: from)
+    // 1) Actualizar la notificación del emisor (A)
     await Notification.findOneAndUpdate(
       {
         user:            from,
@@ -716,17 +705,25 @@ app.post('/friend-request/:id/reject', async (req, res) => {
       { new: true }
     );
 
-    // 5) Crear nueva notificación para el receptor (user: to)
-    await Notification.create({
-      user:            to,
-      partner:         from,
-      friendRequestId: id,
-      message:         `Has rechazado la solicitud de amistad de ${userFrom.nombre}`,
-      type:            'friend_request',
-      status:          'rechazada'
-    });
+    // 2) ***EN VEZ DE CREAR UNA NUEVA NOTIFICACIÓN PARA B***, ACTUALIZAMOS LA YA EXISTENTE
+    await Notification.findOneAndUpdate(
+      {
+        user:            to,
+        partner:         from,
+        type:            'friend_request',
+        status:          'pendiente',
+        friendRequestId: id
+      },
+      {
+        message:   `Has rechazado la solicitud de amistad de ${userFrom.nombre}`,
+        status:    'rechazada',
+        isRead:    false,
+        createdAt: new Date()
+      },
+      { new: true }
+    );
 
-    return res.json({ message: 'Solicitud rechazada' });
+    return res.json({ message: 'Solicitud rechazada y notificaciones actualizadas' });
   } catch (err) {
     console.error('[reject-request] error:', err);
     return res.status(500).json({ error: 'Error interno al rechazar solicitud' });
@@ -758,14 +755,13 @@ app.post('/friend-remove', async (req, res) => {
   }
   try {
     await Promise.all([
-      Usuario.findByIdAndUpdate(userId, { $pull: { friends: friendId }}),
-      Usuario.findByIdAndUpdate(friendId, { $pull: { friends: userId }})
+      Usuario.findByIdAndUpdate(userId,   { $pull: { friends: friendId }}),
+      Usuario.findByIdAndUpdate(friendId, { $pull: { friends: userId  }})
     ]);
-    // Eliminar solicitudes de amistad pendientes entre ambos
     await FriendRequest.deleteMany({
       $or: [
-        { from: userId, to: friendId },
-        { from: friendId, to: userId }
+        { from: userId,   to: friendId },
+        { from: friendId, to: userId  }
       ]
     });
     res.json({ message: 'Amistad eliminada y solicitudes pendientes borradas' });
@@ -786,7 +782,6 @@ app.post('/user-block', async (req, res) => {
       Usuario.findByIdAndUpdate(blocker, { $addToSet: { blockedUsers: blocked }, $pull: { friends: blocked }}),
       Usuario.findByIdAndUpdate(blocked, { $pull: { friends: blocker }})
     ]);
-    // Eliminar solicitudes pendientes
     await FriendRequest.deleteMany({
       $or: [
         { from: blocker, to: blocked },
@@ -834,40 +829,32 @@ app.get('/user-blocked', async (req, res) => {
 
 // === NUEVO ENDPOINT: GUARDAR HISTORIAL DE OFERTAS ===
 app.post('/api/offers', async (req, res) => {
-  // Desestructuramos también `mode` que es obligatorio en el esquema
   const { sellerId, buyerId, buyerName, amount, mode, date, cards } = req.body;
-
-  // Validaciones básicas
   if (
     !mongoose.Types.ObjectId.isValid(sellerId) ||
     !mongoose.Types.ObjectId.isValid(buyerId) ||
     typeof amount !== 'number' ||
-    !['trend','low','manual'].includes(mode) ||  // Validamos el modo
+    !['trend','low','manual'].includes(mode) ||
     !Array.isArray(cards)
   ) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
-
   try {
-    // Creamos el documento incluyendo `mode`
     const offer = new Offer({ sellerId, buyerId, buyerName, amount, mode, date, cards });
     await offer.save();
     return res.status(201).json({ offer });
   } catch (err) {
     console.error('[offers/create]', err);
-    // Devolvemos el mensaje real de error para depuración
     return res.status(500).json({ error: err.message });
   }
 });
 
-// === Endpoint para obtener historial de ofertas de un usuario ===
 app.get('/api/offers', async (req, res) => {
   const { userId } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID de usuario inválido' });
   }
   try {
-    // Filtramos por sellerId (obras vendidas por el usuario)
     const offers = await Offer.find({ sellerId: userId }).sort({ date: -1 });
     return res.json({ offers });
   } catch (err) {
