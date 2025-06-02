@@ -508,12 +508,17 @@ app.post('/friend-request', async (req, res) => {
   }
 
   try {
+<<<<<<< HEAD
     // 3) Verificar si ya existe una solicitud pendiente con los mismos from/to
+=======
+    // Evitar solicitudes duplicadas pendientes
+>>>>>>> ad11f1386101d7d7c08218281e0769768cb64f0d
     const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
     if (exists) {
       return res.status(400).json({ error: 'Solicitud ya enviada' });
     }
 
+<<<<<<< HEAD
     // 4) Crear el documento en la colección friend_requests
     const request = await FriendRequest.create({ from, to });
     // En este punto, `request._id` es el ID de la nueva solicitud creada.
@@ -539,6 +544,35 @@ app.post('/friend-request', async (req, res) => {
     });
 
     // 7) Responder con el objeto de la solicitud creada
+=======
+    // 1. Crear la solicitud en la BD
+    const request = await FriendRequest.create({ from, to });
+
+    // 2. Obtener datos básicos del emisor y receptor para el mensaje
+    const sender = await Usuario.findById(from).select('nombre apellido apodo');
+    const receiver = await Usuario.findById(to).select('nombre apellido apodo');
+
+    // 3. Crear notificación para el receptor (como antes)
+    await Notification.create({
+      user: to,
+      partner: from,
+      message: `Nueva solicitud de amistad de ${sender.apodo}`,
+      type: 'friend_request',
+      status: 'pending'       // se guarda como pendiente
+      // createdAt se genera automáticamente
+    });
+
+    // 4. Crear notificación para el emisor
+    await Notification.create({
+      user: from,
+      partner: to,
+      message: `Enviaste una solicitud a ${receiver.nombre} ${receiver.apellido}`,
+      type: 'friend_request',
+      status: 'pending'       // inicio como pendiente
+      // createdAt se genera automáticamente
+    });
+
+>>>>>>> ad11f1386101d7d7c08218281e0769768cb64f0d
     return res.json({ request });
   } catch (err) {
     console.error('[friend-request] error:', err);
@@ -547,8 +581,11 @@ app.post('/friend-request', async (req, res) => {
 });
 
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> ad11f1386101d7d7c08218281e0769768cb64f0d
 // RUTA ORIGINAL DE ACEPTAR SOLICITUD
 app.post('/friend-request/:id/accept', async (req, res) => {
   const { id } = req.params;
