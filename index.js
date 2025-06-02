@@ -10,7 +10,8 @@ app.use(express.json());
 
 // Conectar a MongoDB
 const MONGO_URI = process.env.MONGO_URI;
-mongoose.connect(MONGO_URI)
+mongoose
+  .connect(MONGO_URI)
   .then(() => console.log('✅ Conectado a MongoDB Atlas'))
   .catch(err => console.error('❌ Error al conectar a MongoDB:', err));
 
@@ -25,17 +26,17 @@ const transporter = nodemailer.createTransport({
 
 // === Esquema de Mongoose para historial de ofertas ===
 const offerSchema = new mongoose.Schema({
-  sellerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // ID del vendedor
-  buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },  // ID del comprador
-  buyerName:  { type: String, required: true },                                      // Nombre visible del comprador
-  amount:     { type: Number, required: true },                                      // Monto total de la oferta
-  mode:       { type: String, enum: ['trend','low','manual'], required: true },       // Modo de cálculo (agregado para inmutabilidad)
-  date:       { type: Date, default: Date.now },                                     // Fecha de creación
-  cards: [  // Detalles de cada carta incluida en la oferta
+  sellerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  buyerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  buyerName:  { type: String, required: true },
+  amount:     { type: Number, required: true },
+  mode:       { type: String, enum: ['trend','low','manual'], required: true },
+  date:       { type: Date, default: Date.now },
+  cards: [
     {
-      cardId:    { type: String, required: true },  // ID de la carta
-      quantity:  { type: Number, required: true },  // Cantidad ofertada
-      unitPrice: { type: Number, required: true }   // Precio unitario fijado en ese momento
+      cardId:    { type: String, required: true },
+      quantity:  { type: Number, required: true },
+      unitPrice: { type: Number, required: true }
     }
   ]
 });
@@ -78,20 +79,26 @@ const PendingUser = mongoose.model('pending_user', pendingUserSchema);
 
 // Esquema de usuario final incluyendo recuperación de contraseña
 const userSchema = new mongoose.Schema({
-  nombre:    { type: String, required: true },
-  apellido:  { type: String, required: true },
-  apodo:     { type: String, unique: true, required: true },
-  correo:    { type: String, unique: true, required: true },
-  password:  { type: String, required: true },
-  verificado:{ type: Boolean, default: true },
-  tokenReset:  String,
-  tokenExpira: Date,
-  library: [{cardId:   { type: String, required: true },quantity: { type: Number, default: 1 }}],
-  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],  // lista de amigos
-  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }]  // usuarios bloqueados
+  nombre:       { type: String, required: true },
+  apellido:     { type: String, required: true },
+  apodo:        { type: String, unique: true, required: true },
+  correo:       { type: String, unique: true, required: true },
+  password:     { type: String, required: true },
+  verificado:   { type: Boolean, default: true },
+  tokenReset:   String,
+  tokenExpira:  Date,
+  library: [
+    {
+      cardId:   { type: String, required: true },
+      quantity: { type: Number, default: 1 }
+    }
+  ],
+  friends:      [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],  
+  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }]   
 });
 const Usuario = mongoose.model('user', userSchema);
-//  ADICIÓN: Definición de esquema y modelo para solicitudes de amistad
+
+// === Definición de esquema y modelo para solicitudes de amistad ===
 const friendRequestSchema = new mongoose.Schema({
   from:   { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
   to:     { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
@@ -100,16 +107,24 @@ const friendRequestSchema = new mongoose.Schema({
 friendRequestSchema.index({ from: 1, to: 1, status: 1 }, { unique: true });
 const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 
-// Esquema de notificaciones con partner, cards y amount para ofertas
+// Esquema de notificaciones con partner, friendRequestId, cards y amount para ofertas
 const notificationSchema = new mongoose.Schema({
-  user:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
-  partner: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
-  message: { type: String, required: true },
-  type:    { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
-  isRead:  { type: Boolean, default: false },
-  status:  { type: String, enum: ['pendiente', 'aceptada', 'rechazada'], default: 'pendiente' },
-  cards:   [{ cardId: { type: String, required: true }, quantity: { type: Number, required: true }, name: String, image: String }],
-  amount:  Number
+  user:            { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  partner:         { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
+  friendRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'friend_request' }, 
+  message:         { type: String, required: true },
+  type:            { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
+  isRead:          { type: Boolean, default: false },
+  status:          { type: String, enum: ['pendiente', 'aceptada', 'rechazada'], default: 'pendiente' },
+  cards:           [
+                    {
+                      cardId:   { type: String, required: true },
+                      quantity: { type: Number, required: true },
+                      name:     String,
+                      image:    String
+                    }
+                  ],
+  amount:          Number
 }, { timestamps: true });
 
 notificationSchema.index({ user: 1, isRead: 1 });
@@ -118,7 +133,7 @@ const Notification = mongoose.model('notification', notificationSchema);
 
 
 
-// Crear notificación (general)
+// === CREAR NOTIFICACIÓN (general) ===
 app.post('/notifications', async (req, res) => {
   const { userId, partner, message, type, cards, amount } = req.body;
   if (!mongoose.Types.ObjectId.isValid(userId) || !message) {
@@ -133,7 +148,9 @@ app.post('/notifications', async (req, res) => {
   }
 });
 
-// Enviar oferta y crear notificaciones
+
+
+// === ENVIAR OFERTA Y CREAR NOTIFICACIONES ===
 app.post('/offer', async (req, res) => {
   const { from, to, cardsArray, offerAmount } = req.body;
   if (
@@ -147,6 +164,7 @@ app.post('/offer', async (req, res) => {
   try {
     const sender = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
+
     await Notification.create({
       user:    to,
       partner: from,
@@ -155,6 +173,7 @@ app.post('/offer', async (req, res) => {
       cards:   cardsArray,
       amount:  parseFloat(offerAmount)
     });
+
     await Notification.create({
       user:    from,
       partner: to,
@@ -163,6 +182,7 @@ app.post('/offer', async (req, res) => {
       cards:   cardsArray,
       amount:  parseFloat(offerAmount)
     });
+
     res.status(201).json({ message: 'Oferta enviada y notificaciones creadas' });
   } catch (err) {
     console.error('[offer] error:', err);
@@ -171,7 +191,8 @@ app.post('/offer', async (req, res) => {
 });
 
 
-// Obtener notificaciones de usuario (filtrado y población)
+
+// === OBTENER NOTIFICACIONES DE USUARIO (filtrado y población) ===
 app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -179,20 +200,13 @@ app.get('/notifications', async (req, res) => {
   }
   const filter = { user: userId };
   if (isRead === 'false') filter.isRead = false;
+
   try {
     const notis = await Notification.find(filter)
-      .populate('user', 'nombre apodo')   // remitente
-      .populate('partner', 'nombre apodo') // destinatario en ofertas
+      .populate('partner', 'nombre apodo')
       .sort({ createdAt: -1 });
 
-    // Renombrar campo user -> sender para la respuesta
-    const result = notis.map(n => {
-      const obj = n.toObject();
-      obj.sender = obj.user;
-      delete obj.user;
-      return obj;
-    });
-
+    const result = notis.map(n => n.toObject());
     res.json({ notifications: result });
   } catch (err) {
     console.error('[notifications/get]', err);
@@ -216,12 +230,9 @@ app.patch('/notifications/:id/respond', async (req, res) => {
   const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
 
   try {
-    // 1. Actualizar la notificación original (receptor)
     const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
 
-    // Construir mensaje distinto según rol
-    // El receptor es quien recibe la acción (id coincide)
     const receptorMessage = action === 'accept'
       ? `Has aceptado la oferta de ${byApodo}`
       : `Rechazaste la oferta de ${byApodo}`;
@@ -231,7 +242,6 @@ app.patch('/notifications/:id/respond', async (req, res) => {
     noti.createdAt = new Date();
     await noti.save();
 
-    // 2. Actualizar la notificación de la contraparte (emisor)
     const counterpart = await Notification.findOne({
       user: noti.partner,
       partner: noti.user,
@@ -251,7 +261,6 @@ app.patch('/notifications/:id/respond', async (req, res) => {
       await counterpart.save();
     }
 
-    // 3. Responder con detalles
     return res.json({
       message: `Notificación(es) actualizada(s) a estado '${newStatus}'`,
       updated: {
@@ -267,7 +276,7 @@ app.patch('/notifications/:id/respond', async (req, res) => {
 
 
 
-// Registro y verificación
+// === REGISTRO Y VERIFICACIÓN ===
 app.post('/register-request', async (req, res) => {
   const { nombre, apellido, apodo, correo, password } = req.body;
   if (!nombre || !apellido || !apodo || !correo || !password) {
@@ -280,102 +289,139 @@ app.post('/register-request', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(password, salt);
     const token = crypto.randomBytes(32).toString('hex');
-    await PendingUser.create({ nombre, apellido, apodo, correo, password: hashed, tokenVerificacion: token, tokenExpira: new Date(Date.now()+10*60*1000) });
+    await PendingUser.create({
+      nombre,
+      apellido,
+      apodo,
+      correo,
+      password: hashed,
+      tokenVerificacion: token,
+      tokenExpira: new Date(Date.now() + 10 * 60 * 1000)
+    });
     await sendVerificationLink(correo, token);
     res.status(200).json({ message: 'Correo de verificación enviado' });
   } catch (err) {
     res.status(500).json({ error: 'Error al procesar registro', detalles: err.message });
   }
 });
+
 app.get('/verify-token', async (req, res) => {
   const { token } = req.query;
   try {
     const p = await PendingUser.findOne({ tokenVerificacion: token });
     if (!p) return res.status(400).json({ error: 'Token inválido o ya usado' });
     if (p.tokenExpira < new Date()) return res.status(400).json({ error: 'Token expirado' });
-    await Usuario.create({ nombre:p.nombre, apellido:p.apellido, apodo:p.apodo, correo:p.correo, password:p.password, verificado:true });
-    await PendingUser.deleteOne({ correo:p.correo });
+    await Usuario.create({
+      nombre: p.nombre,
+      apellido: p.apellido,
+      apodo: p.apodo,
+      correo: p.correo,
+      password: p.password,
+      verificado: true
+    });
+    await PendingUser.deleteOne({ correo: p.correo });
     res.status(201).json({ message: 'Cuenta verificada exitosamente' });
   } catch (err) {
-    res.status(500).json({ error:'Error al verificar token', detalles:err.message });
+    res.status(500).json({ error: 'Error al verificar token', detalles: err.message });
   }
 });
 
 // Autenticación estándar
 app.post('/login', async (req, res) => {
   const { correo, password } = req.body;
-  if (!correo || !password) return res.status(400).json({ error:'Correo y contraseña son obligatorios' });
+  if (!correo || !password) return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
   try {
     const u = await Usuario.findOne({ correo });
-    if (!u) return res.status(400).json({ error:'Correo no registrado' });
-    if (!await bcrypt.compare(password, u.password)) return res.status(401).json({ error:'Contraseña incorrecta' });
-    res.json({ message:'Inicio de sesión exitoso', usuario:{ id:u._id, apodo:u.apodo, correo:u.correo, nombre:u.nombre } });
-  } catch(err) {
-    res.status(500).json({ error:'Error al iniciar sesión', detalles:err.message });
+    if (!u) return res.status(400).json({ error: 'Correo no registrado' });
+    if (!await bcrypt.compare(password, u.password)) return res.status(401).json({ error: 'Contraseña incorrecta' });
+    res.json({
+      message: 'Inicio de sesión exitoso',
+      usuario: {
+        id: u._id,
+        apodo: u.apodo,
+        correo: u.correo,
+        nombre: u.nombre
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
   }
 });
+
 app.get('/usuarios', async (req, res) => {
-  try { res.json(await Usuario.find().select('-password')); } catch(err) { res.status(500).json({ error:'Error al obtener usuarios', detalles:err.message }); }
+  try {
+    res.json(await Usuario.find().select('-password'));
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener usuarios', detalles: err.message });
+  }
 });
 
 // Recuperación de contraseña
 app.post('/forgot-password', async (req, res) => {
   const { correo } = req.body;
-  if (!correo) return res.status(400).json({ error:'Correo es obligatorio' });
+  if (!correo) return res.status(400).json({ error: 'Correo es obligatorio' });
   try {
     const u = await Usuario.findOne({ correo });
-    if (!u) return res.status(400).json({ error:'Correo no registrado' });
+    if (!u) return res.status(400).json({ error: 'Correo no registrado' });
     const token = crypto.randomBytes(32).toString('hex');
     u.tokenReset  = token;
-    u.tokenExpira = new Date(Date.now()+10*60*1000);
+    u.tokenExpira = new Date(Date.now() + 10 * 60 * 1000);
     await u.save();
     const link = `https://myappserve-go.onrender.com/reset-redirect?token=${token}`;
-    await transporter.sendMail({ from:`"SetMatch Soporte" <${process.env.EMAIL_USER}>`, to:correo, subject:'Restablecer contraseña - SetMatch', html:`<h2>Restablecer tu contraseña</h2><p><a href="${link}">${link}</a></p><p>Expira en 10 minutos.</p>` });
+    await transporter.sendMail({
+      from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
+      to: correo,
+      subject: 'Restablecer contraseña - SetMatch',
+      html: `<h2>Restablecer tu contraseña</h2><p><a href="${link}">${link}</a></p><p>Expira en 10 minutos.</p>`
+    });
     console.log('[forgot-password] Token generado', { correo, token });
-    res.status(200).json({ message:'Enlace de recuperación enviado' });
-  } catch(err) {
-    res.status(500).json({ error:'Error al procesar recuperación', detalles:err.message });
+    res.status(200).json({ message: 'Enlace de recuperación enviado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al procesar recuperación', detalles: err.message });
   }
 });
+
 app.get('/reset-redirect', (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).send('Token faltante');
   res.send(`<html><head><meta http-equiv="refresh" content="0; url=setmatch://restablecer?token=${token}" /></head><body><p>Redirigiendo a la app...</p></body></html>`);
 });
+
 app.post('/reset-password', async (req, res) => {
   const { token, nuevaPassword } = req.body;
   if (!token || !nuevaPassword) {
     console.error('[reset-password] Falta token o nuevaPassword', { token, nuevaPassword });
-    return res.status(400).json({ error:'Token y nueva contraseña son obligatorios' });
+    return res.status(400).json({ error: 'Token y nueva contraseña son obligatorios' });
   }
   try {
-    const u = await Usuario.findOne({ tokenReset:token });
+    const u = await Usuario.findOne({ tokenReset: token });
     if (!u) {
       console.error('[reset-password] Token inválido o ya usado', { token });
-      return res.status(400).json({ error:'Token inválido o ya usado', details:{ receivedToken:token } });
+      return res.status(400).json({ error: 'Token inválido o ya usado', details: { receivedToken: token } });
     }
     if (u.tokenExpira < new Date()) {
-      console.error('[reset-password] Token expirado', { token, expiresAt:u.tokenExpira });
+      console.error('[reset-password] Token expirado', { token, expiresAt: u.tokenExpira });
       u.tokenReset = undefined;
-      u.tokenExpira=undefined;
+      u.tokenExpira = undefined;
       await u.save();
-      return res.status(400).json({ error:'El token ha expirado', details:{ receivedToken:token, expiredAt:u.tokenExpira } });
+      return res.status(400).json({ error: 'El token ha expirado', details: { receivedToken: token, expiredAt: u.tokenExpira } });
     }
     const salt = await bcrypt.genSalt(10);
     u.password = await bcrypt.hash(nuevaPassword, salt);
     u.tokenReset = undefined;
-    u.tokenExpira=undefined;
+    u.tokenExpira = undefined;
     await u.save();
-    console.log('[reset-password] Contraseña restablecida', { userId:u._id });
-    res.status(200).json({ message:'Contraseña restablecida correctamente' });
-  } catch(err) {
+    console.log('[reset-password] Contraseña restablecida', { userId: u._id });
+    res.status(200).json({ message: 'Contraseña restablecida correctamente' });
+  } catch (err) {
     console.error('[reset-password] Error interno', err);
-    res.status(500).json({ error:'Error al restablecer contraseña', detalles:err.message, stack:err.stack });
+    res.status(500).json({ error: 'Error al restablecer contraseña', detalles: err.message, stack: err.stack });
   }
 });
 
-// --- Librería de cartas: agregar, remover y listar ---
 
+
+// --- Librería de cartas: agregar, remover y listar ---
 
 // 📥 Agregar 1 carta (incrementa cantidad o la inserta)
 app.post('/library/add', async (req, res) => {
@@ -383,11 +429,9 @@ app.post('/library/add', async (req, res) => {
   if (!userId || !cardId) {
     return res.status(400).json({ error: 'Falta userId o cardId' });
   }
-
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID de usuario inválido' });
   }
-
   try {
     const user = await Usuario.findById(userId);
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -398,7 +442,6 @@ app.post('/library/add', async (req, res) => {
     } else {
       user.library.push({ cardId, quantity: 1 });
     }
-
     await user.save();
     res.json({ library: user.library });
   } catch (err) {
@@ -413,11 +456,9 @@ app.post('/library/remove', async (req, res) => {
   if (!userId || !cardId) {
     return res.status(400).json({ error: 'Falta userId o cardId' });
   }
-
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID de usuario inválido' });
   }
-
   try {
     const user = await Usuario.findById(userId);
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -431,7 +472,6 @@ app.post('/library/remove', async (req, res) => {
     if (user.library[idx].quantity <= 0) {
       user.library.splice(idx, 1);
     }
-
     await user.save();
     res.json({ library: user.library });
   } catch (err) {
@@ -443,21 +483,20 @@ app.post('/library/remove', async (req, res) => {
 // 📄 Obtener biblioteca del usuario
 app.get('/library', async (req, res) => {
   const { userId } = req.query;
-
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID de usuario inválido o faltante' });
   }
-
   try {
     const user = await Usuario.findById(userId).select('library');
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
-
     res.json({ library: user.library || [] });
   } catch (err) {
     console.error('[library/get]', err);
-    res.status(500).json({ error: 'Error interno al obtener la bibliotecas' });
+    res.status(500).json({ error: 'Error interno al obtener la biblioteca' });
   }
 });
+
+// 👥 Buscar usuarios
 app.get('/users/search', async (req, res) => {
   const { query } = req.query;
   if (!query) return res.status(400).json({ error: 'Falta query' });
@@ -477,7 +516,7 @@ app.get('/users/search', async (req, res) => {
   }
 });
 
-// Solicitud de amistad revisada: elimina solicitudes previas y crea nueva
+// === Obtener solicitudes de amistad pendientes para un usuario ===
 app.get('/friend-requests', async (req, res) => {
   const { userId } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId))
@@ -491,86 +530,214 @@ app.get('/friend-requests', async (req, res) => {
     res.status(500).json({ error: 'Error interno al obtener solicitudes' });
   }
 });
-// Solicitud de amistad: enviar y notificar automáticamente
+
+// === Crear una nueva solicitud de amistad ===
 app.post('/friend-request', async (req, res) => {
   const { from, to } = req.body;
+
+  // 1) Validar que ambos sean ObjectId válidos
   if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
+  // 2) Evitar que el usuario se envíe solicitud a sí mismo
   if (from === to) {
     return res.status(400).json({ error: 'No puedes enviarte una solicitud a ti mismo' });
   }
+
   try {
-    // Crear solicitud
+    // 3) Verificar si ya existe una solicitud pendiente con los mismos from/to
     const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
     if (exists) {
       return res.status(400).json({ error: 'Solicitud ya enviada' });
     }
+
+    // 4) Crear el documento en la colección friend_requests
     const request = await FriendRequest.create({ from, to });
-    // Notificar al receptor
-    await Notification.create({ user: to, message: `Nueva solicitud de amistad de ${from}`, type: 'friend_request' });
-    res.json({ request });
+
+    // 5) Obtener nombre/apodo del emisor y del receptor
+    const userFrom = await Usuario.findById(from).select('nombre apodo');
+    const userTo   = await Usuario.findById(to).select('nombre apodo');
+
+    // 6) Crear la notificación para el receptor (B)
+    await Notification.create({
+      user:            to,
+      partner:         from,
+      friendRequestId: request._id,
+      message:         `Nueva solicitud de amistad de ${userFrom.nombre}`,
+      type:            'friend_request',
+      status:          'pendiente'
+    });
+
+    // 7) Crear la notificación para el emisor (A)
+    await Notification.create({
+      user:            from,
+      partner:         to,
+      friendRequestId: request._id,
+      message:         `Enviaste una solicitud a ${userTo.nombre}`,
+      type:            'friend_request',
+      status:          'pendiente'
+    });
+
+    // 8) Responder con el objeto de la solicitud creada
+    return res.json({ request });
   } catch (err) {
     console.error('[friend-request] error:', err);
-    res.status(500).json({ error: 'Error interno al enviar solicitud' });
+    return res.status(500).json({ error: 'Error interno al enviar solicitud' });
   }
 });
 
 
-// Aceptar solicitud: actualizar y notificar
+
+// === RUTA ACTUALIZADA DE ACEPTAR SOLICITUD ===
 app.post('/friend-request/:id/accept', async (req, res) => {
   const { id } = req.params;
+
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
+
   try {
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
+
+    // Cambiar estado de la solicitud
     reqDoc.status = 'accepted';
     await reqDoc.save();
+
     const { from, to } = reqDoc;
-    // Actualizar amigos en ambos usuarios
+
+    // Agregar a amigos mutuamente
     await Promise.all([
       Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
-    // Notificar al emisor
-    await Notification.create({ user: from, message: `Tu solicitud fue aceptada por ${to}`, type: 'friend_request' });
-    res.json({ message: 'Solicitud aceptada' });
+
+    // Obtener datos de nombre/apodo
+    const userFrom = await Usuario.findById(from).select('nombre apodo');
+    const userTo   = await Usuario.findById(to).select('nombre apodo');
+
+    // 1) Actualizar la notificación del emisor (A)
+    await Notification.findOneAndUpdate(
+      { 
+        user:            from, 
+        partner:         to, 
+        type:            'friend_request', 
+        status:          'pendiente',
+        friendRequestId: id 
+      },
+      {
+        message:   `Tu solicitud fue aceptada por ${userTo.nombre}`,
+        status:    'aceptada',
+        isRead:    false,
+        createdAt: new Date()
+      },
+      { new: true }
+    );
+
+    // 2) ***EN VEZ DE CREAR UNA NUEVA NOTIFICACIÓN PARA B***, ACTUALIZAMOS LA YA EXISTENTE
+    await Notification.findOneAndUpdate(
+      {
+        user:            to,
+        partner:         from,
+        type:            'friend_request',
+        status:          'pendiente',
+        friendRequestId: id
+      },
+      {
+        message:   `Has aceptado la solicitud de amistad de ${userFrom.nombre}`,
+        status:    'aceptada',
+        isRead:    false,
+        createdAt: new Date()
+      },
+      { new: true }
+    );
+
+    return res.json({ message: 'Solicitud aceptada y notificaciones actualizadas' });
   } catch (err) {
     console.error('[accept-request] error:', err);
-    res.status(500).json({ error: 'Error interno al aceptar solicitud' });
+    return res.status(500).json({ error: 'Error interno al aceptar solicitud' });
   }
 });
 
-// Rechazar solicitud: actualizar y notificar
+
+
+// === RUTA ACTUALIZADA DE RECHAZAR SOLICITUD ===
 app.post('/friend-request/:id/reject', async (req, res) => {
   const { id } = req.params;
+
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
+
   try {
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
+
+    // Cambiar estado a 'rejected'
     reqDoc.status = 'rejected';
     await reqDoc.save();
-    // Notificar al emisor
-    await Notification.create({ user: reqDoc.from, message: `Tu solicitud fue rechazada por ${reqDoc.to}`, type: 'friend_request' });
-    res.json({ message: 'Solicitud rechazada' });
+
+    const { from, to } = reqDoc;
+
+    // Obtener datos de nombre/apodo
+    const userFrom = await Usuario.findById(from).select('nombre apodo');
+    const userTo   = await Usuario.findById(to).select('nombre apodo');
+
+    // 1) Actualizar la notificación del emisor (A)
+    await Notification.findOneAndUpdate(
+      {
+        user:            from,
+        partner:         to,
+        type:            'friend_request',
+        status:          'pendiente',
+        friendRequestId: id
+      },
+      {
+        message:   `Tu solicitud fue rechazada por ${userTo.nombre}`,
+        status:    'rechazada',
+        isRead:    false,
+        createdAt: new Date()
+      },
+      { new: true }
+    );
+
+    // 2) ***EN VEZ DE CREAR UNA NUEVA NOTIFICACIÓN PARA B***, ACTUALIZAMOS LA YA EXISTENTE
+    await Notification.findOneAndUpdate(
+      {
+        user:            to,
+        partner:         from,
+        type:            'friend_request',
+        status:          'pendiente',
+        friendRequestId: id
+      },
+      {
+        message:   `Has rechazado la solicitud de amistad de ${userFrom.nombre}`,
+        status:    'rechazada',
+        isRead:    false,
+        createdAt: new Date()
+      },
+      { new: true }
+    );
+
+    return res.json({ message: 'Solicitud rechazada y notificaciones actualizadas' });
   } catch (err) {
     console.error('[reject-request] error:', err);
-    res.status(500).json({ error: 'Error interno al rechazar solicitud' });
+    return res.status(500).json({ error: 'Error interno al rechazar solicitud' });
   }
 });
 
-// Obtener lista de amigos
+
+
+// === OBTENER LISTA DE AMIGOS ===
 app.get('/friends', async (req, res) => {
   const { userId } = req.query;
-  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ error: 'ID inválido o faltante' });
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID inválido o faltante' });
+  }
   try {
     const user = await Usuario.findById(userId).populate('friends', 'nombre apellido apodo _id');
     res.json({ friends: user ? user.friends : [] });
@@ -580,113 +747,114 @@ app.get('/friends', async (req, res) => {
   }
 });
 
-// Eliminar amistad: elimina mutuamente de ambos usuarios y borra solicitudes pendientes
+// === ELIMINAR AMISTAD ===
 app.post('/friend-remove', async (req, res) => {
   const { userId, friendId } = req.body;
-  if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(friendId))
+  if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(friendId)) {
     return res.status(400).json({ error: 'ID inválido' });
+  }
   try {
     await Promise.all([
-      Usuario.findByIdAndUpdate(userId, { $pull: { friends: friendId }}),
-      Usuario.findByIdAndUpdate(friendId, { $pull: { friends: userId }})
+      Usuario.findByIdAndUpdate(userId,   { $pull: { friends: friendId }}),
+      Usuario.findByIdAndUpdate(friendId, { $pull: { friends: userId  }})
     ]);
-    // Eliminar solicitudes de amistad pendientes entre ambos
     await FriendRequest.deleteMany({
       $or: [
-        { from: userId, to: friendId },
-        { from: friendId, to: userId }
+        { from: userId,   to: friendId },
+        { from: friendId, to: userId  }
       ]
     });
     res.json({ message: 'Amistad eliminada y solicitudes pendientes borradas' });
-  } catch(err) {
+  } catch (err) {
     console.error('[friend-remove] error:', err);
-    res.status(500).json({ error:'Error interno al eliminar amistad' });
+    res.status(500).json({ error: 'Error interno al eliminar amistad' });
   }
 });
 
-// Bloquear usuario: añade a blockedUsers y elimina amistad si existiera
+// === BLOQUEAR USUARIO ===
 app.post('/user-block', async (req, res) => {
   const { blocker, blocked } = req.body;
-  if (!mongoose.Types.ObjectId.isValid(blocker) || !mongoose.Types.ObjectId.isValid(blocked))
-    return res.status(400).json({ error:'ID inválido' });
+  if (!mongoose.Types.ObjectId.isValid(blocker) || !mongoose.Types.ObjectId.isValid(blocked)) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
   try {
     await Promise.all([
       Usuario.findByIdAndUpdate(blocker, { $addToSet: { blockedUsers: blocked }, $pull: { friends: blocked }}),
       Usuario.findByIdAndUpdate(blocked, { $pull: { friends: blocker }})
     ]);
-    // Opcional: eliminar solicitudes pendientes
-    await FriendRequest.deleteMany({ $or:[{ from:blocker,to:blocked },{ from:blocked,to:blocker }] });
-    res.json({ message:'Usuario bloqueado' });
-  } catch(err) {
+    await FriendRequest.deleteMany({
+      $or: [
+        { from: blocker, to: blocked },
+        { from: blocked, to: blocker }
+      ]
+    });
+    res.json({ message: 'Usuario bloqueado' });
+  } catch (err) {
     console.error('[user-block] error:', err);
-    res.status(500).json({ error:'Error interno al bloquear usuario' });
+    res.status(500).json({ error: 'Error interno al bloquear usuario' });
   }
 });
 
-// Desbloquear usuario: elimina de blockedUsers
+// === DESBLOQUEAR USUARIO ===
 app.post('/user-unblock', async (req, res) => {
   const { unblocker, unblocked } = req.body;
-  if (!mongoose.Types.ObjectId.isValid(unblocker) || !mongoose.Types.ObjectId.isValid(unblocked))
+  if (!mongoose.Types.ObjectId.isValid(unblocker) || !mongoose.Types.ObjectId.isValid(unblocked)) {
     return res.status(400).json({ error: 'ID inválido' });
+  }
   try {
     await Usuario.findByIdAndUpdate(unblocker, { $pull: { blockedUsers: unblocked }});
     res.json({ message: 'Usuario desbloqueado' });
-  } catch(err) {
+  } catch (err) {
     console.error('[user-unblock] error:', err);
-    res.status(500).json({ error:'Error interno al desbloquear usuario' });
+    res.status(500).json({ error: 'Error interno al desbloquear usuario' });
   }
 });
 
-// Obtener bloqueados
+// === OBTENER USUARIOS BLOQUEADOS ===
 app.get('/user-blocked', async (req, res) => {
   const { userId } = req.query;
-  if (!mongoose.Types.ObjectId.isValid(userId))
-    return res.status(400).json({ error:'ID inválido o faltante' });
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'ID inválido o faltante' });
+  }
   try {
     const user = await Usuario.findById(userId).populate('blockedUsers', 'nombre apellido apodo _id');
     res.json({ blocked: user.blockedUsers || [] });
-  } catch(err) {
+  } catch (err) {
     console.error('[user-blocked] error:', err);
-    res.status(500).json({ error:'Error interno al obtener bloqueados' });
+    res.status(500).json({ error: 'Error interno al obtener bloqueados' });
   }
 });
 
-// === Nuevo endpoint: guardar historial de ofertas ===
-app.post('/api/offers', async (req, res) => {
-  // Desestructuramos también `mode` que es obligatorio en el esquema
-  const { sellerId, buyerId, buyerName, amount, mode, date, cards } = req.body;
 
-  // Validaciones básicas
+
+// === NUEVO ENDPOINT: GUARDAR HISTORIAL DE OFERTAS ===
+app.post('/api/offers', async (req, res) => {
+  const { sellerId, buyerId, buyerName, amount, mode, date, cards } = req.body;
   if (
     !mongoose.Types.ObjectId.isValid(sellerId) ||
     !mongoose.Types.ObjectId.isValid(buyerId) ||
     typeof amount !== 'number' ||
-    !['trend','low','manual'].includes(mode) ||  // Validamos el modo
+    !['trend','low','manual'].includes(mode) ||
     !Array.isArray(cards)
   ) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
-
   try {
-    // Creamos el documento incluyendo `mode`
     const offer = new Offer({ sellerId, buyerId, buyerName, amount, mode, date, cards });
     await offer.save();
     return res.status(201).json({ offer });
   } catch (err) {
     console.error('[offers/create]', err);
-    // Devolvemos el mensaje real de error para depuración
     return res.status(500).json({ error: err.message });
   }
 });
 
-// === Endpoint para obtener historial de ofertas de un usuario ===
 app.get('/api/offers', async (req, res) => {
   const { userId } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID de usuario inválido' });
   }
   try {
-    // Filtramos por sellerId para obras vendidas por el usuario
     const offers = await Offer.find({ sellerId: userId }).sort({ date: -1 });
     return res.json({ offers });
   } catch (err) {
@@ -695,16 +863,15 @@ app.get('/api/offers', async (req, res) => {
   }
 });
 
+
+
 // === Manejadores de rutas no encontradas y errores globales ===
 app.use((req, res) => res.status(404).json({ error: `Ruta ${req.method} ${req.originalUrl} no encontrada` }));
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Error interno', mensaje: err.message });
 });
-// 404 y errores
-app.use((req, res) => res.status(404).json({ error:`Ruta ${req.method} ${req.originalUrl} no encontrada` }));
-app.use((err, req, res, next) => { console.error(err.stack); res.status(500).json({ error:'Error interno', mensaje:err.message }); });
 
 // Iniciar servidor
-const PORT = process.env.PORT||3000;
-app.listen(PORT,()=>console.log(`🚀 Servidor corriendo en puerto ${PORT}`));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Servidor corriendo en puerto ${PORT}`));
