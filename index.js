@@ -602,38 +602,45 @@ app.post('/friend-request/:id/accept', async (req, res) => {
 
 
 
-// Rechazar solicitud: actualizar y notificar
 app.post('/friend-request/:id/reject', async (req, res) => {
   const { id } = req.params;
+
+  // 1) Validar ID de solicitud
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
+
   try {
+    // 2) Buscar y verificar estado pending
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
+
+    // 3) Cambiamos el estado a 'rejected'
     reqDoc.status = 'rejected';
     await reqDoc.save();
+
     const { from, to } = reqDoc;
 
-    // 1. Actualizar notificación del emisor
+    // 4) Actualizar la notificación del emisor (user: from)
     await Notification.findOneAndUpdate(
-      { user: from, partner: to, type: 'friend_request', status: 'pending' },
+      { user: from, partner: to, type: 'friend_request', status: 'pendiente' },
       {
-        message: `Tu solicitud fue rechazada por ${to}`,
-        status: 'rejected',
+        message:   `Tu solicitud fue rechazada por ${to}`,
+        status:    'rechazada',
         createdAt: new Date()
-      }
+      },
+      { new: true }
     );
 
-    // 2. Crear notificación para el receptor informando rechazo
+    // 5) Crear una nueva notificación para el receptor (user: to)
     await Notification.create({
-      user: to,
+      user:    to,
       partner: from,
       message: `Has rechazado la solicitud de amistad de ${from}`,
-      type: 'friend_request',
-      status: 'rejected'
+      type:    'friend_request',
+      status:  'rechazada'
     });
 
     return res.json({ message: 'Solicitud rechazada' });
@@ -642,6 +649,7 @@ app.post('/friend-request/:id/reject', async (req, res) => {
     return res.status(500).json({ error: 'Error interno al rechazar solicitud' });
   }
 });
+
 
 
 // Obtener lista de amigos
