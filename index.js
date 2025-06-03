@@ -134,6 +134,8 @@ const Notification = mongoose.model('notification', notificationSchema);
 
 
 // === CREAR NOTIFICACIÓN (general) ===
+// ========== Rutas de la API ==========
+
 // 1) Crear notificación genérica (se usa para ofrecer o para solicitudes)
 app.post('/notifications', async (req, res) => {
   const { userId, partner, message, type, cards, amount } = req.body;
@@ -148,8 +150,6 @@ app.post('/notifications', async (req, res) => {
     return res.status(500).json({ error: 'Error interno al crear notificación' });
   }
 });
-
-
 
 // 2) Enviar oferta y generar dos notificaciones (receptor y emisor)
 app.post('/offer', async (req, res) => {
@@ -193,8 +193,6 @@ app.post('/offer', async (req, res) => {
   }
 });
 
-
-
 // 3) Obtener notificaciones de un usuario (filtra por `user` y opcionalmente por `isRead`)
 app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
@@ -217,11 +215,7 @@ app.get('/notifications', async (req, res) => {
   }
 });
 
-
-
-// =============================================
-// Endpoint para responder oferta y actualizar estado
-// =============================================
+// 4) Responder oferta: cambia estado en ambas notificaciones (receptor y emisor)
 app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
   const { action, byApodo } = req.body; // action = 'accept' | 'reject'
@@ -265,7 +259,6 @@ app.patch('/notifications/:id/respond', async (req, res) => {
     return res.status(500).json({ error: 'Error interno al actualizar notificación' });
   }
 });
-
 
 
 // === REGISTRO Y VERIFICACIÓN ===
