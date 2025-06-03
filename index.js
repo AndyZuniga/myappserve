@@ -111,26 +111,27 @@ const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 const notificationSchema = new mongoose.Schema({
   user:            { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
   partner:         { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
-  role:    { type: String, enum: ['sender', 'receiver'], required: true },
-  friendRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'friend_request' }, // Nuevo campo
+  role:            { type: String, enum: ['sender', 'receiver'], required: true },
+  friendRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'friend_request' },
   message:         { type: String, required: true },
   type:            { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
   isRead:          { type: Boolean, default: false },
   status:          { type: String, enum: ['pendiente', 'aceptada', 'rechazada'], default: 'pendiente' },
-  cards:           [
-                    {
-                      cardId:   { type: String, required: true },
-                      quantity: { type: Number, required: true },
-                      name:     String,
-                      image:    String
-                    }
-                  ],
+  cards: [
+    {
+      cardId:    { type: String, required: true },
+      quantity:  { type: Number, required: true },
+      name:      String,
+      image:     String
+    }
+  ],
   amount:          Number
 }, { timestamps: true });
 
 notificationSchema.index({ user: 1, isRead: 1 });
 
 const Notification = mongoose.model('notification', notificationSchema);
+
 
 
 
@@ -156,36 +157,37 @@ app.post('/notifications', async (req, res) => {
 app.post('/offer', async (req, res) => {
   const { from, to, cardsArray, offerAmount } = req.body;
 
+  // 1) Validaciones básicas de formato
   if (
     !mongoose.Types.ObjectId.isValid(from) ||
-    !mongoose.Types.ObjectId.isValid(to) ||
-    !Array.isArray(cardsArray) ||
+    !mongoose.Types.ObjectId.isValid(to)   ||
+    !Array.isArray(cardsArray)             ||
     !offerAmount
   ) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
 
   try {
-    // Obtenemos los apodos para armar los mensajes
+    // 2) Obtener apodos de emisor y receptor
     const sender   = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
 
-    // 1) Notificación para el RECEPTOR de la oferta (role: 'receiver')
+    // 3) Crear notificación para el RECEPTOR
     await Notification.create({
-      user:    to,
-      partner: from,
-      role:    'receiver',                                  // <-- aquí marcamos como receptor
+      user:    to,                                  // el receptor recibe esta notificación
+      partner: from,                                // partner = el emisor real
+      role:    'receiver',                          // marcamos explícitamente que esta es “receiver”
       message: `Has recibido una oferta de ${sender.apodo}`,
       type:    'offer',
       cards:   cardsArray,
       amount:  parseFloat(offerAmount)
     });
 
-    // 2) Notificación para el EMISOR de la oferta (role: 'sender')
+    // 4) Crear notificación para el EMISOR
     await Notification.create({
-      user:    from,
-      partner: to,
-      role:    'sender',                                     // <-- aquí marcamos como emisor
+      user:    from,                                // el emisor recibe esta notificación
+      partner: to,                                  // partner = el receptor real
+      role:    'sender',                            // marcamos explícitamente que esta es “sender”
       message: `Esperando respuesta de ${receiver.apodo}`,
       type:    'offer',
       cards:   cardsArray,
@@ -200,20 +202,27 @@ app.post('/offer', async (req, res) => {
 });
 
 
+
 // 3) Obtener notificaciones de un usuario (filtra por `user` y opcionalmente por `isRead`)
 app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
+
+  // 1) Validar que userId sea ObjectId válido
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
+
+  // 2) Construir filtro básico
   const filter = { user: userId };
   if (isRead === 'false') filter.isRead = false;
+
   try {
-    // Buscar notificaciones, poblar el campo `partner` con `nombre` y `apodo`
+    // 3) Buscar notificaciones y poblar el campo partner (traemos nombre y apodo)
     const notis = await Notification.find(filter)
       .populate('partner', 'nombre apodo')
       .sort({ createdAt: -1 });
-    // Convertir a objetos puros antes de enviar
+
+    // 4) Convertir a JSON “puro” para enviarlo
     const result = notis.map(n => n.toObject());
     return res.json({ notifications: result });
   } catch (err) {
@@ -222,19 +231,21 @@ app.get('/notifications', async (req, res) => {
   }
 });
 
+
 // 4) Responder oferta: cambia estado en ambas notificaciones (receptor y emisor)
 app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
-  const { action, byApodo } = req.body; // action = 'accept' | 'reject'
+  const { action, byApodo } = req.body; // action: 'accept' | 'reject'
   if (!['accept','reject'].includes(action)) {
     return res.status(400).json({ error: 'Acción inválida' });
   }
   const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
+
   try {
     // 4.1) Actualizar la notificación del receptor
     const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
-    // Cambiar mensaje y estado
+
     noti.message   = action === 'accept'
                       ? `Has aceptado la oferta de ${byApodo}`
                       : `Rechazaste la oferta de ${byApodo}`;
@@ -243,14 +254,15 @@ app.patch('/notifications/:id/respond', async (req, res) => {
     noti.createdAt = new Date();
     await noti.save();
 
-    // 4.2) Buscar la notificación del emisor (contraparte)
+    // 4.2) Buscar la notificación contrapartida (emisor) y actualizarla
     const counterpart = await Notification.findOne({
-      user:    noti.partner,      // Campo `partner` del receptor apunta al emisor
-      partner: noti.user,         // Campo `user` del receptor
+      user:    noti.partner,    // si noti.user era el receptor, noti.partner es el emisor
+      partner: noti.user,       // noti.user era el receptor
       type:    'offer',
       amount:  noti.amount,
       'cards.cardId': { $in: noti.cards.map(c => c.cardId) }
     });
+
     if (counterpart) {
       counterpart.message   = action === 'accept'
                               ? `Tu oferta ha sido aceptada por ${byApodo}`
@@ -260,12 +272,16 @@ app.patch('/notifications/:id/respond', async (req, res) => {
       counterpart.createdAt = new Date();
       await counterpart.save();
     }
-    return res.json({ message: `Notificación(es) actualizada(s) a estado '${newStatus}'` });
+
+    return res.json({
+      message: `Notificación(es) actualizada(s) a estado '${newStatus}'`
+    });
   } catch (err) {
     console.error('[notifications/respond]', err);
     return res.status(500).json({ error: 'Error interno al actualizar notificación' });
   }
 });
+
 
 
 // === REGISTRO Y VERIFICACIÓN ===
