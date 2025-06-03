@@ -111,10 +111,7 @@ const FriendRequest = mongoose.model('friend_request', friendRequestSchema);
 const notificationSchema = new mongoose.Schema({
   user:            { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
   partner:         { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
-<<<<<<< HEAD
   role:    { type: String, enum: ['sender', 'receiver'], required: true },
-=======
->>>>>>> 1ec9ecacd4e976695687f533683ebbb9572a604b
   friendRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'friend_request' }, // Nuevo campo
   message:         { type: String, required: true },
   type:            { type: String, enum: ['offer', 'friend_request', 'system'], default: 'system' },
@@ -155,7 +152,6 @@ app.post('/notifications', async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
 
 app.post('/offer', async (req, res) => {
   const { from, to, cardsArray, offerAmount } = req.body;
@@ -166,33 +162,15 @@ app.post('/offer', async (req, res) => {
     !Array.isArray(cardsArray) ||
     !offerAmount
   ) {
-=======
-// 2) Enviar oferta y generar dos notificaciones (receptor y emisor)
-app.post('/offer', async (req, res) => {
-  const { from, to, cardsArray, offerAmount } = req.body;
-  // Validar que `from` y `to` sean ObjectId válidos y que `cardsArray` sea un arreglo
-  if (!mongoose.Types.ObjectId.isValid(from) ||
-      !mongoose.Types.ObjectId.isValid(to)   ||
-      !Array.isArray(cardsArray)             ||
-      !offerAmount) {
->>>>>>> 1ec9ecacd4e976695687f533683ebbb9572a604b
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
 
   try {
-<<<<<<< HEAD
     // Obtenemos los apodos para armar los mensajes
     const sender   = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
 
     // 1) Notificación para el RECEPTOR de la oferta (role: 'receiver')
-=======
-    // Buscar apodo de quien envía y de quien recibe
-    const sender = await Usuario.findById(from).select('apodo');
-    const receiver = await Usuario.findById(to).select('apodo');
-
-    // 2.1) Crear notificación para el receptor de la oferta
->>>>>>> 1ec9ecacd4e976695687f533683ebbb9572a604b
     await Notification.create({
       user:    to,
       partner: from,
@@ -203,11 +181,7 @@ app.post('/offer', async (req, res) => {
       amount:  parseFloat(offerAmount)
     });
 
-<<<<<<< HEAD
     // 2) Notificación para el EMISOR de la oferta (role: 'sender')
-=======
-    // 2.2) Crear notificación para el emisor de la oferta
->>>>>>> 1ec9ecacd4e976695687f533683ebbb9572a604b
     await Notification.create({
       user:    from,
       partner: to,
@@ -225,10 +199,7 @@ app.post('/offer', async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
 
-=======
->>>>>>> 1ec9ecacd4e976695687f533683ebbb9572a604b
 // 3) Obtener notificaciones de un usuario (filtra por `user` y opcionalmente por `isRead`)
 app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
@@ -567,7 +538,6 @@ app.post('/friend-request', async (req, res) => {
       return res.status(400).json({ error: 'Solicitud ya enviada' });
     }
     const request = await FriendRequest.create({ from, to });
-<<<<<<< HEAD
     const userFrom = await Usuario.findById(from).select('nombre apodo');
     const userTo   = await Usuario.findById(to).select('nombre apodo');
 
@@ -576,38 +546,17 @@ app.post('/friend-request', async (req, res) => {
       user:            to,                           // A quién va dirigida la notificación
       partner:         from,                         // Quién envía la solicitud
       role:            'receiver',                   // <-- marcado como receptor
-=======
-    // En este punto, request._id es el ID de la nueva solicitud creada.
-
-    // 5) Obtener nombre/apodo del emisor (from) y del receptor (to)
-    const userFrom = await Usuario.findById(from).select('nombre apodo');
-    const userTo   = await Usuario.findById(to).select('nombre apodo');
-
-    // 6) Crear la notificación para el receptor (user: to)
-    //    Se envía partner: from para referenciar quién inició la solicitud.
-    await Notification.create({
-      user:            to,                           // A quién va dirigida la notificación
-      partner:         from,                         // Quién envía la solicitud
->>>>>>> 1ec9ecacd4e976695687f533683ebbb9572a604b
       friendRequestId: request._id,                  // Guardamos el ID de la solicitud aquí
       message:         `Nueva solicitud de amistad de ${userFrom.nombre}`, 
       type:            'friend_request',
       status:          'pendiente'
     });
 
-<<<<<<< HEAD
     // Notificación para el EMISOR (role: 'sender')
     await Notification.create({
       user:            from,                         // A quién va dirigida esta notificación (el que envía)
       partner:         to,                           // Quién recibe la solicitud
       role:            'sender',                     // <-- marcado como emisor
-=======
-    // 7) Crear la notificación para el emisor (user: from)
-    //    Esto le permitirá al emisor ver “Enviaste una solicitud a X” con estado “pendiente”.
-    await Notification.create({
-      user:            from,                         // A quién va dirigida esta notificación (el que envía)
-      partner:         to,                           // Quién recibe la solicitud
->>>>>>> 1ec9ecacd4e976695687f533683ebbb9572a604b
       friendRequestId: request._id,                  // Mismo ID de solicitud
       message:         `Enviaste una solicitud a ${userTo.nombre}`, 
       type:            'friend_request',
