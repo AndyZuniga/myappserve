@@ -134,6 +134,7 @@ const Notification = mongoose.model('notification', notificationSchema);
 
 
 // === CREAR NOTIFICACIÓN (general) ===
+// 1) Crear notificación genérica (se usa para ofrecer o para solicitudes)
 app.post('/notifications', async (req, res) => {
   const { userId, partner, message, type, cards, amount } = req.body;
   if (!mongoose.Types.ObjectId.isValid(userId) || !message) {
@@ -141,32 +142,31 @@ app.post('/notifications', async (req, res) => {
   }
   try {
     const noti = await Notification.create({ user: userId, partner, message, type, cards, amount });
-    res.status(201).json({ notification: noti });
+    return res.status(201).json({ notification: noti }); // Devuelve el documento creado
   } catch (err) {
     console.error('[notifications/create]', err);
-    res.status(500).json({ error: 'Error interno al crear notificación' });
+    return res.status(500).json({ error: 'Error interno al crear notificación' });
   }
 });
 
 
 
-// === ENVIAR OFERTA Y CREAR NOTIFICACIONES ===
+// 2) Enviar oferta y generar dos notificaciones (receptor y emisor)
 app.post('/offer', async (req, res) => {
   const { from, to, cardsArray, offerAmount } = req.body;
-  if (
-    !mongoose.Types.ObjectId.isValid(from) ||
-    !mongoose.Types.ObjectId.isValid(to) ||
-    !Array.isArray(cardsArray) ||
-    !offerAmount
-  ) {
+  // Validar que `from` y `to` sean ObjectId válidos y que `cardsArray` sea un arreglo
+  if (!mongoose.Types.ObjectId.isValid(from) ||
+      !mongoose.Types.ObjectId.isValid(to)   ||
+      !Array.isArray(cardsArray)             ||
+      !offerAmount) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
   try {
-    // Obtener apodos para los mensajes
+    // Buscar apodo de quien envía y de quien recibe
     const sender = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
 
-    // Notificación para el receptor de la oferta
+    // 2.1) Crear notificación para el receptor de la oferta
     await Notification.create({
       user:    to,
       partner: from,
@@ -176,7 +176,7 @@ app.post('/offer', async (req, res) => {
       amount:  parseFloat(offerAmount)
     });
 
-    // Notificación para el emisor de la oferta
+    // 2.2) Crear notificación para el emisor de la oferta
     await Notification.create({
       user:    from,
       partner: to,
@@ -186,16 +186,16 @@ app.post('/offer', async (req, res) => {
       amount:  parseFloat(offerAmount)
     });
 
-    res.status(201).json({ message: 'Oferta enviada y notificaciones creadas' });
+    return res.status(201).json({ message: 'Oferta enviada y notificaciones creadas' });
   } catch (err) {
     console.error('[offer] error:', err);
-    res.status(500).json({ error: 'Error interno al enviar oferta' });
+    return res.status(500).json({ error: 'Error interno al enviar oferta' });
   }
 });
 
 
 
-// === OBTENER NOTIFICACIONES DE USUARIO (filtrado y población) ===
+// 3) Obtener notificaciones de un usuario (filtra por `user` y opcionalmente por `isRead`)
 app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -203,25 +203,17 @@ app.get('/notifications', async (req, res) => {
   }
   const filter = { user: userId };
   if (isRead === 'false') filter.isRead = false;
-
   try {
-    // Encontrar notificaciones y poblar partner (y cantidad opcional de sender)
+    // Buscar notificaciones, poblar el campo `partner` con `nombre` y `apodo`
     const notis = await Notification.find(filter)
       .populate('partner', 'nombre apodo')
       .sort({ createdAt: -1 });
-
-    // Opcional: Renombrar campo user -> sender para que en el frontend lo reciba como sender
-    const result = notis.map(n => {
-      const obj = n.toObject();
-      // no hacemos .populate('user'), porque en esta ruta user es siempre el receptor
-      // pero si quisieras, podrías poblar también "user" y renombrarlo
-      return obj;
-    });
-
-    res.json({ notifications: result });
+    // Convertir a objetos puros antes de enviar
+    const result = notis.map(n => n.toObject());
+    return res.json({ notifications: result });
   } catch (err) {
     console.error('[notifications/get]', err);
-    res.status(500).json({ error: 'Error interno al obtener notificaciones' });
+    return res.status(500).json({ error: 'Error interno al obtener notificaciones' });
   }
 });
 
@@ -232,56 +224,42 @@ app.get('/notifications', async (req, res) => {
 // =============================================
 app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
-  const { action, byApodo } = req.body;
-
-  if (!['accept', 'reject'].includes(action)) {
+  const { action, byApodo } = req.body; // action = 'accept' | 'reject'
+  if (!['accept','reject'].includes(action)) {
     return res.status(400).json({ error: 'Acción inválida' });
   }
-
   const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
-
   try {
-    // 1. Actualizar la notificación original (receptor)
+    // 4.1) Actualizar la notificación del receptor
     const noti = await Notification.findById(id);
     if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
-
-    // Construir mensaje distinto según rol
-    const receptorMessage = action === 'accept'
-      ? `Has aceptado la oferta de ${byApodo}`
-      : `Rechazaste la oferta de ${byApodo}`;
-    noti.message = receptorMessage;
-    noti.status = newStatus;
-    noti.isRead = false;
+    // Cambiar mensaje y estado
+    noti.message   = action === 'accept'
+                      ? `Has aceptado la oferta de ${byApodo}`
+                      : `Rechazaste la oferta de ${byApodo}`;
+    noti.status    = newStatus;
+    noti.isRead    = false;
     noti.createdAt = new Date();
     await noti.save();
 
-    // 2. Actualizar la notificación de la contraparte (emisor)
+    // 4.2) Buscar la notificación del emisor (contraparte)
     const counterpart = await Notification.findOne({
-      user: noti.partner,
-      partner: noti.user,
-      type: 'offer',
-      amount: noti.amount,
-      'cards.cardId': { $in: noti.cards.map(c => c.cardId) },
+      user:    noti.partner,      // Campo `partner` del receptor apunta al emisor
+      partner: noti.user,         // Campo `user` del receptor
+      type:    'offer',
+      amount:  noti.amount,
+      'cards.cardId': { $in: noti.cards.map(c => c.cardId) }
     });
-
     if (counterpart) {
-      const emisorMessage = action === 'accept'
-        ? `Tu oferta ha sido aceptada por ${byApodo}`
-        : `Tu oferta ha sido rechazada por ${byApodo}`;
-      counterpart.message = emisorMessage;
-      counterpart.status = newStatus;
-      counterpart.isRead = false;
+      counterpart.message   = action === 'accept'
+                              ? `Tu oferta ha sido aceptada por ${byApodo}`
+                              : `Tu oferta ha sido rechazada por ${byApodo}`;
+      counterpart.status    = newStatus;
+      counterpart.isRead    = false;
       counterpart.createdAt = new Date();
       await counterpart.save();
     }
-
-    return res.json({
-      message: `Notificación(es) actualizada(s) a estado '${newStatus}'`,
-      updated: {
-        receptor: { id: noti._id, status: noti.status },
-        emisor: counterpart ? { id: counterpart._id, status: counterpart.status } : null
-      }
-    });
+    return res.json({ message: `Notificación(es) actualizada(s) a estado '${newStatus}'` });
   } catch (err) {
     console.error('[notifications/respond]', err);
     return res.status(500).json({ error: 'Error interno al actualizar notificación' });
