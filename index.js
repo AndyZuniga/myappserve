@@ -139,19 +139,39 @@ const Notification = mongoose.model('notification', notificationSchema);
 // ========== Rutas de la API ==========
 
 // 1) Crear notificación genérica (se usa para ofrecer o para solicitudes)
+// === CREAR NOTIFICACIÓN (general) – ahora con “role” obligatorio ===
+// === CREAR NOTIFICACIÓN (general) – ahora con “role” obligatorio ===
 app.post('/notifications', async (req, res) => {
-  const { userId, partner, message, type, cards, amount } = req.body;
-  if (!mongoose.Types.ObjectId.isValid(userId) || !message) {
-    return res.status(400).json({ error: 'Datos inválidos' });
+  const { userId, partner, role, message, type, cards, amount } = req.body;
+  // Verificamos que venga userId válido, message y role
+  if (
+    !mongoose.Types.ObjectId.isValid(userId) ||
+    !message ||
+    (role !== 'sender' && role !== 'receiver')
+  ) {
+    return res.status(400).json({ error: 'Datos inválidos (falta userId, role o message)' });
   }
+
   try {
-    const noti = await Notification.create({ user: userId, partner, message, type, cards, amount });
-    return res.status(201).json({ notification: noti }); // Devuelve el documento creado
+    // Ahora incluimos `role` en el objeto que creamos
+    const noti = await Notification.create({
+      user:    userId,
+      partner,
+      role,      // ← aquí
+      message,
+      type,
+      cards,
+      amount
+    });
+
+    return res.status(201).json({ notification: noti });
   } catch (err) {
     console.error('[notifications/create]', err);
     return res.status(500).json({ error: 'Error interno al crear notificación' });
   }
 });
+
+
 
 
 app.post('/offer', async (req, res) => {
