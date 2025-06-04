@@ -302,6 +302,27 @@ app.patch('/notifications/:id/respond', async (req, res) => {
   }
 });
 
+// --- ELIMINAR NOTIFICACIÓN ---
+app.delete('/notifications/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'ID de notificación inválido' });
+  }
+
+  try {
+    const noti = await Notification.findById(id);
+    if (!noti) {
+      return res.status(404).json({ error: 'Notificación no encontrada' });
+    }
+    await Notification.deleteOne({ _id: id });
+    return res.json({ message: 'Notificación eliminada' });
+  } catch (err) {
+    console.error('[notifications/delete]', err);
+    return res.status(500).json({ error: 'Error interno al eliminar notificación' });
+  }
+});
+
+
 
 
 // === REGISTRO Y VERIFICACIÓN ===
