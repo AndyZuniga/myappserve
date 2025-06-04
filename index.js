@@ -613,43 +613,42 @@ app.post('/friend-request', async (req, res) => {
 
 
 // === RUTA ACTUALIZADA DE ACEPTAR SOLICITUD ===
+// --- Ruta actualizada de aceptar solicitud ---
 app.post('/friend-request/:id/accept', async (req, res) => {
   const { id } = req.params;
-
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
-
   try {
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-    // Cambiar estado de la solicitud
+    // 1) Cambiar estado de la solicitud
     reqDoc.status = 'accepted';
     await reqDoc.save();
 
     const { from, to } = reqDoc;
 
-    // Agregar a amigos mutuamente
+    // 2) Agregar a amigos mutuamente
     await Promise.all([
       Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
 
-    // Obtener datos de nombre/apodo para los mensajes
+    // 3) Obtener datos para armar los mensajes
     const userFrom = await Usuario.findById(from).select('nombre apodo');
     const userTo   = await Usuario.findById(to).select('nombre apodo');
 
-    // Actualizar la notificación del emisor (user: from)
+    // 4) Actualizar la notificación del EMISOR (el que envió la solicitud)
     await Notification.findOneAndUpdate(
-      { 
-        user: from, 
-        partner: to, 
-        type: 'friend_request', 
-        status: 'pendiente',
-        friendRequestId: id 
+      {
+        user:            from,          // el “from” original
+        partner:         to,            // el “to” original
+        type:            'friend_request',
+        status:          'pendiente',
+        friendRequestId: id
       },
       {
         message:   `Tu solicitud fue aceptada por ${userTo.nombre}`,
@@ -660,10 +659,11 @@ app.post('/friend-request/:id/accept', async (req, res) => {
       { new: true }
     );
 
-    // Crear nueva notificación para el receptor (user: to)
+    // 5) Crear la nueva notificación para el RECEPTOR (quien acaba de aceptar)
     await Notification.create({
-      user:            to,
-      partner:         from,
+      user:            to,                    // el receptor original
+      partner:         from,                  // quien envió la solicitud
+      role:            'receiver',            // <--- aquí agregamos `role`
       friendRequestId: id,
       message:         `Has aceptado la solicitud de amistad de ${userFrom.nombre}`,
       type:            'friend_request',
@@ -676,6 +676,7 @@ app.post('/friend-request/:id/accept', async (req, res) => {
     return res.status(500).json({ error: 'Error interno al aceptar solicitud' });
   }
 });
+
 
 
 
