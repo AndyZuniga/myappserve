@@ -1,19 +1,12 @@
 const express = require('express');
-const cors = require('cors');            // ← IMPORTAR CORS aquí
+const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 require('dotenv').config();
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'Aatrox2887Andy9881';
-const http = require('http');
-const { Server } = require('socket.io');
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: 'https://tu-frontend.com' })); // ← CORRECTO: cors ya existe
-
 
 // Conectar a MongoDB
 const MONGO_URI = process.env.MONGO_URI;
@@ -21,36 +14,6 @@ mongoose
   .connect(MONGO_URI)
   .then(() => console.log('✅ Conectado a MongoDB Atlas'))
   .catch(err => console.error('❌ Error al conectar a MongoDB:', err));
-
-// Middleware para verificar JWT
-function authMiddleware(req, res, next) {
-  // El token debe enviarse en el header "Authorization: Bearer <token>"
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Token no proporcionado' });
-  }
-
-  // Separar "Bearer" del token real
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    return res.status(401).json({ error: 'Formato de token inválido' });
-  }
-
-  const token = parts[1];
-  try {
-    // Verificar firma y extraer payload
-    const decoded = jwt.verify(token, JWT_SECRET);
-    // Guardar información útil en req.user para las rutas
-    req.user = { id: decoded.userId, apodo: decoded.apodo };
-    return next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Token inválido o expirado' });
-  }
-}
-
-
-
-
 
 // Configurar transporter de Nodemailer
 const transporter = nodemailer.createTransport({
@@ -121,7 +84,7 @@ const userSchema = new mongoose.Schema({
   apodo:        { type: String, unique: true, required: true },
   correo:       { type: String, unique: true, required: true },
   password:     { type: String, required: true },
-  verificado: { type: Boolean, default: false },
+  verificado:   { type: Boolean, default: true },
   tokenReset:   String,
   tokenExpira:  Date,
   library: [
@@ -169,17 +132,18 @@ notificationSchema.index({ user: 1, isRead: 1 });
 
 const Notification = mongoose.model('notification', notificationSchema);
 
+
+
+
 // === CREAR NOTIFICACIÓN (general) ===
+// ========== Rutas de la API ==========
+
+// 1) Crear notificación genérica (se usa para ofrecer o para solicitudes)
 // === CREAR NOTIFICACIÓN (general) – ahora con “role” obligatorio ===
-app.post('/notifications', authMiddleware, async (req, res) => {
+// === CREAR NOTIFICACIÓN (general) – ahora con “role” obligatorio ===
+app.post('/notifications', async (req, res) => {
   const { userId, partner, role, message, type, cards, amount } = req.body;
-
-  // Validar primero que el token coincide con el userId del body
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para crear notificaciones para otro usuario' });
-  }
-
-  // Verificar que userId sea un ObjectId válido y que message y role existan
+  // Verificamos que venga userId válido, message y role
   if (
     !mongoose.Types.ObjectId.isValid(userId) ||
     !message ||
@@ -189,28 +153,15 @@ app.post('/notifications', authMiddleware, async (req, res) => {
   }
 
   try {
-    // Crear la notificación en la base de datos
+    // Ahora incluimos `role` en el objeto que creamos
     const noti = await Notification.create({
-      user:   userId,
+      user:    userId,
       partner,
-      role,
+      role,      // ← aquí
       message,
       type,
       cards,
       amount
-    });
-
-    // Emitir evento WebSocket al usuario destino
-    io.to(userId.toString()).emit('newNotification', {
-      id:        noti._id,
-      user:      noti.user,
-      partner:   noti.partner,
-      role:      noti.role,
-      message:   noti.message,
-      type:      noti.type,
-      cards:     noti.cards,
-      amount:    noti.amount,
-      createdAt: noti.createdAt
     });
 
     return res.status(201).json({ notification: noti });
@@ -223,73 +174,44 @@ app.post('/notifications', authMiddleware, async (req, res) => {
 
 
 
-
-app.post('/offer', authMiddleware, async (req, res) => {
+app.post('/offer', async (req, res) => {
   const { from, to, cardsArray, offerAmount } = req.body;
 
-  // Validar primero que el token coincide con el campo “from”
-  if (req.user.id !== from) {
-    return res.status(403).json({ error: 'No puedes enviar oferta en nombre de otro usuario' });
-  }
-
-  // Validaciones básicas de formato
+  // 1) Validaciones básicas de formato
   if (
     !mongoose.Types.ObjectId.isValid(from) ||
-    !mongoose.Types.ObjectId.isValid(to) ||
-    !Array.isArray(cardsArray) ||
+    !mongoose.Types.ObjectId.isValid(to)   ||
+    !Array.isArray(cardsArray)             ||
     !offerAmount
   ) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
 
   try {
-    const sender = await Usuario.findById(from).select('apodo');
+    // 2) Obtener apodos de emisor y receptor
+    const sender   = await Usuario.findById(from).select('apodo');
     const receiver = await Usuario.findById(to).select('apodo');
 
-    // Crear notificación para el RECEPTOR
-    const receiverNoti = await Notification.create({
-      user:    to,
-      partner: from,
-      role:    'receiver',
+    // 3) Crear notificación para el RECEPTOR
+    await Notification.create({
+      user:    to,                                  // el receptor recibe esta notificación
+      partner: from,                                // partner = el emisor real
+      role:    'receiver',                          // marcamos explícitamente que esta es “receiver”
       message: `Has recibido una oferta de ${sender.apodo}`,
       type:    'offer',
       cards:   cardsArray,
       amount:  parseFloat(offerAmount)
     });
 
-    io.to(to.toString()).emit('newNotification', {
-      id:        receiverNoti._id,
-      user:      receiverNoti.user,
-      partner:   receiverNoti.partner,
-      role:      receiverNoti.role,
-      message:   receiverNoti.message,
-      type:      receiverNoti.type,
-      cards:     receiverNoti.cards,
-      amount:    receiverNoti.amount,
-      createdAt: receiverNoti.createdAt
-    });
-
-    // Crear notificación para el EMISOR
-    const senderNoti = await Notification.create({
-      user:    from,
-      partner: to,
-      role:    'sender',
+    // 4) Crear notificación para el EMISOR
+    await Notification.create({
+      user:    from,                                // el emisor recibe esta notificación
+      partner: to,                                  // partner = el receptor real
+      role:    'sender',                            // marcamos explícitamente que esta es “sender”
       message: `Esperando respuesta de ${receiver.apodo}`,
       type:    'offer',
       cards:   cardsArray,
       amount:  parseFloat(offerAmount)
-    });
-
-    io.to(from.toString()).emit('newNotification', {
-      id:        senderNoti._id,
-      user:      senderNoti.user,
-      partner:   senderNoti.partner,
-      role:      senderNoti.role,
-      message:   senderNoti.message,
-      type:      senderNoti.type,
-      cards:     senderNoti.cards,
-      amount:    senderNoti.amount,
-      createdAt: senderNoti.createdAt
     });
 
     return res.status(201).json({ message: 'Oferta enviada y notificaciones creadas' });
@@ -301,30 +223,26 @@ app.post('/offer', authMiddleware, async (req, res) => {
 
 
 
-
-
 // 3) Obtener notificaciones de un usuario (filtra por `user` y opcionalmente por `isRead`)
-app.get('/notifications', authMiddleware, async (req, res) => {
+app.get('/notifications', async (req, res) => {
   const { userId, isRead } = req.query;
 
-  // 1) Verificar que userId viene en la query y es el mismo que en el token
-  if (!userId || req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para ver estas notificaciones' });
-  }
-
-  // 2) Validar que sea un ObjectId válido
+  // 1) Validar que userId sea ObjectId válido
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
 
-  // 3) Construir filtro
+  // 2) Construir filtro básico
   const filter = { user: userId };
   if (isRead === 'false') filter.isRead = false;
 
   try {
+    // 3) Buscar notificaciones y poblar el campo partner (traemos nombre y apodo)
     const notis = await Notification.find(filter)
       .populate('partner', 'nombre apodo')
       .sort({ createdAt: -1 });
+
+    // 4) Convertir a JSON “puro” para enviarlo
     const result = notis.map(n => n.toObject());
     return res.json({ notifications: result });
   } catch (err) {
@@ -334,33 +252,20 @@ app.get('/notifications', authMiddleware, async (req, res) => {
 });
 
 
-
-
-// Responder oferta: cambia estado en ambas notificaciones (receptor y emisor)
-app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
-  // 1) Extraemos el id de los parámetros
+// 4) Responder oferta: cambia estado en ambas notificaciones (receptor y emisor)
+app.patch('/notifications/:id/respond', async (req, res) => {
   const { id } = req.params;
-
-  // 2) Buscamos la notificación y validamos que exista
-  const noti = await Notification.findById(id);
-  if (!noti) {
-    return res.status(404).json({ error: 'Notificación no encontrada' });
-  }
-
-  // 3) Validamos que el usuario autenticado sea el destinatario de esta notificación
-  if (req.user.id !== noti.user.toString()) {
-    return res.status(403).json({ error: 'No autorizado para responder esta notificación' });
-  }
-
-  // 4) Extraemos action y byApodo del cuerpo
   const { action, byApodo } = req.body; // action: 'accept' | 'reject'
-  if (!['accept', 'reject'].includes(action)) {
+  if (!['accept','reject'].includes(action)) {
     return res.status(400).json({ error: 'Acción inválida' });
   }
   const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
 
   try {
-    // 5) Actualizamos la propia notificación
+    // 4.1) Actualizar la notificación del receptor
+    const noti = await Notification.findById(id);
+    if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
+
     noti.message   = action === 'accept'
                       ? `Has aceptado la oferta de ${byApodo}`
                       : `Rechazaste la oferta de ${byApodo}`;
@@ -369,24 +274,10 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
     noti.createdAt = new Date();
     await noti.save();
 
-    // 6) Emitimos evento WebSocket al receptor original
-    io.to(noti.user.toString()).emit('newNotification', {
-      id:        noti._id,
-      user:      noti.user,
-      partner:   noti.partner,
-      role:      noti.role,
-      message:   noti.message,
-      type:      noti.type,
-      status:    noti.status,
-      cards:     noti.cards,
-      amount:    noti.amount,
-      createdAt: noti.createdAt
-    });
-
-    // 7) Buscamos y actualizamos la notificación contrapartida (emisor)
+    // 4.2) Buscar la notificación contrapartida (emisor) y actualizarla
     const counterpart = await Notification.findOne({
-      user:    noti.partner,
-      partner: noti.user,
+      user:    noti.partner,    // si noti.user era el receptor, noti.partner es el emisor
+      partner: noti.user,       // noti.user era el receptor
       type:    'offer',
       amount:  noti.amount,
       'cards.cardId': { $in: noti.cards.map(c => c.cardId) }
@@ -400,50 +291,36 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
       counterpart.isRead    = false;
       counterpart.createdAt = new Date();
       await counterpart.save();
-
-      // 8) Emitimos evento WebSocket al emisor original
-      io.to(counterpart.user.toString()).emit('newNotification', {
-        id:        counterpart._id,
-        user:      counterpart.user,
-        partner:   counterpart.partner,
-        role:      counterpart.role,
-        message:   counterpart.message,
-        type:      counterpart.type,
-        status:    counterpart.status,
-        cards:     counterpart.cards,
-        amount:    counterpart.amount,
-        createdAt: counterpart.createdAt
-      });
     }
 
-    return res.json({ message: `Notificación(es) actualizada(s) a estado '${newStatus}'` });
+    return res.json({
+      message: `Notificación(es) actualizada(s) a estado '${newStatus}'`
+    });
   } catch (err) {
     console.error('[notifications/respond]', err);
     return res.status(500).json({ error: 'Error interno al actualizar notificación' });
   }
 });
 
-
-// backend, justo después de app.patch('/notifications/:id/respond', …)
-app.patch('/notifications/:id/read', authMiddleware, async (req, res) => {
+// --- ELIMINAR NOTIFICACIÓN ---
+app.delete('/notifications/:id', async (req, res) => {
   const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'ID de notificación inválido' });
+  }
+
   try {
     const noti = await Notification.findById(id);
-    if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
-    // Verificamos que el usuario autenticado sea el destinatario
-    if (req.user.id !== noti.user.toString()) {
-      return res.status(403).json({ error: 'No autorizado' });
+    if (!noti) {
+      return res.status(404).json({ error: 'Notificación no encontrada' });
     }
-    noti.isRead = true;
-    await noti.save();
-    return res.json({ message: 'Marcada como leída' });
+    await Notification.deleteOne({ _id: id });
+    return res.json({ message: 'Notificación eliminada' });
   } catch (err) {
-    console.error('[notifications/read]', err);
-    return res.status(500).json({ error: 'Error interno al marcar como leída' });
+    console.error('[notifications/delete]', err);
+    return res.status(500).json({ error: 'Error interno al eliminar notificación' });
   }
 });
-
-
 
 
 
@@ -502,62 +379,28 @@ app.get('/verify-token', async (req, res) => {
   }
 });
 
-// ====================
-//   Ruta de LOGIN
-// ====================
+// Autenticación estándar
 app.post('/login', async (req, res) => {
   const { correo, password } = req.body;
-  if (!correo || !password) {
-    return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
-  }
-
+  if (!correo || !password) return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
   try {
     const u = await Usuario.findOne({ correo });
-    if (!u) {
-      return res.status(400).json({ error: 'Correo no registrado' });
-    }
-
-    // Verificar que la cuenta esté confirmada
-    if (!u.verificado) {
-      return res.status(403).json({ error: 'Cuenta no verificada. Revisa tu correo.' });
-    }
-
-    // Comparar contraseña
-    const match = await bcrypt.compare(password, u.password);
-    if (!match) {
-      return res.status(401).json({ error: 'Contraseña incorrecta' });
-    }
-
-    // Generar payload mínimo para el JWT
-    const payload = {
-      userId: u._id.toString(),
-      apodo:  u.apodo
-    };
-
-    // Firmar el token con la clave secreta (aquí aseguramos que expire en 1 día)
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
-
-    // *******************
-    //  ACA SE AGREGARÁ token
-    // *******************
-    return res.status(200).json({
+    if (!u) return res.status(400).json({ error: 'Correo no registrado' });
+    if (!await bcrypt.compare(password, u.password)) return res.status(401).json({ error: 'Contraseña incorrecta' });
+    res.json({
       message: 'Inicio de sesión exitoso',
-      token,   // <— Asegúrate de incluir este campo
       usuario: {
-        id:      u._id,
-        apodo:   u.apodo,
-        correo:  u.correo,
-        //nombre:  u.nombre,
-        //apellido:u.apellido
+        id: u._id,
+        apodo: u.apodo,
+        correo: u.correo,
+        nombre: u.nombre,
+        apellido: u.appellido
       }
     });
   } catch (err) {
-    console.error('[login] error:', err);
-    return res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
+    res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
   }
 });
-
-
 
 app.get('/usuarios', async (req, res) => {
   try {
@@ -635,11 +478,8 @@ app.post('/reset-password', async (req, res) => {
 // --- Librería de cartas: agregar, remover y listar ---
 
 // 📥 Agregar 1 carta (incrementa cantidad o la inserta)
-app.post('/library/add', authMiddleware, async (req, res) => {
+app.post('/library/add', async (req, res) => {
   const { userId, cardId } = req.body;
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para modificar esta biblioteca' });
-  }
   if (!userId || !cardId) {
     return res.status(400).json({ error: 'Falta userId o cardId' });
   }
@@ -665,7 +505,7 @@ app.post('/library/add', authMiddleware, async (req, res) => {
 });
 
 // 📤 Quitar 1 carta (decrementa o elimina si queda 0)
-app.post('/library/remove', authMiddleware, async (req, res) => {
+app.post('/library/remove', async (req, res) => {
   const { userId, cardId } = req.body;
   if (!userId || !cardId) {
     return res.status(400).json({ error: 'Falta userId o cardId' });
@@ -695,7 +535,7 @@ app.post('/library/remove', authMiddleware, async (req, res) => {
 });
 
 // 📄 Obtener biblioteca del usuario
-app.get('/library', authMiddleware, async (req, res) => {
+app.get('/library', async (req, res) => {
   const { userId } = req.query;
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID de usuario inválido o faltante' });
@@ -731,7 +571,7 @@ app.get('/users/search', async (req, res) => {
 });
 
 // === Obtener solicitudes de amistad pendientes para un usuario ===
-app.get('/friend-requests', authMiddleware, async (req, res) => {
+app.get('/friend-requests', async (req, res) => {
   const { userId } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId))
     return res.status(400).json({ error: 'ID inválido o faltante' });
@@ -746,18 +586,14 @@ app.get('/friend-requests', authMiddleware, async (req, res) => {
 });
 
 
-app.post('/friend-request',authMiddleware, async (req, res) => {
+app.post('/friend-request', async (req, res) => {
   const { from, to } = req.body;
-  if (
-    !mongoose.Types.ObjectId.isValid(from) ||
-    !mongoose.Types.ObjectId.isValid(to)
-  ) {
+  if (!mongoose.Types.ObjectId.isValid(from) || !mongoose.Types.ObjectId.isValid(to)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
   if (from === to) {
     return res.status(400).json({ error: 'No puedes enviarte una solicitud a ti mismo' });
   }
-
   try {
     const exists = await FriendRequest.findOne({ from, to, status: 'pending' });
     if (exists) {
@@ -765,48 +601,28 @@ app.post('/friend-request',authMiddleware, async (req, res) => {
     }
     const request = await FriendRequest.create({ from, to });
     const userFrom = await Usuario.findById(from).select('nombre apodo');
-    const userTo = await Usuario.findById(to).select('nombre apodo');
+    const userTo   = await Usuario.findById(to).select('nombre apodo');
 
-    // Notificación para el RECEPTOR (receiver)
-    const recvNoti = await Notification.create({
-      user:            to,
-      partner:         from,
-      role:            'receiver',
-      friendRequestId: request._id,
-      message:         `Nueva solicitud de amistad de ${userFrom.nombre}`,
+    // Notificación para el RECEPTOR (role: 'receiver')
+    await Notification.create({
+      user:            to,                           // A quién va dirigida la notificación
+      partner:         from,                         // Quién envía la solicitud
+      role:            'receiver',                   // <-- marcado como receptor
+      friendRequestId: request._id,                  // Guardamos el ID de la solicitud aquí
+      message:         `Nueva solicitud de amistad de ${userFrom.nombre}`, 
       type:            'friend_request',
       status:          'pendiente'
     });
-    io.to(to.toString()).emit('newNotification', {
-      id:        recvNoti._id,
-      user:      recvNoti.user,
-      partner:   recvNoti.partner,
-      role:      recvNoti.role,
-      message:   recvNoti.message,
-      type:      recvNoti.type,
-      status:    recvNoti.status,
-      createdAt: recvNoti.createdAt
-    });
 
-    // Notificación para el EMISOR (sender)
-    const sendNoti = await Notification.create({
-      user:            from,
-      partner:         to,
-      role:            'sender',
-      friendRequestId: request._id,
-      message:         `Enviaste una solicitud a ${userTo.nombre}`,
+    // Notificación para el EMISOR (role: 'sender')
+    await Notification.create({
+      user:            from,                         // A quién va dirigida esta notificación (el que envía)
+      partner:         to,                           // Quién recibe la solicitud
+      role:            'sender',                     // <-- marcado como emisor
+      friendRequestId: request._id,                  // Mismo ID de solicitud
+      message:         `Enviaste una solicitud a ${userTo.nombre}`, 
       type:            'friend_request',
       status:          'pendiente'
-    });
-    io.to(from.toString()).emit('newNotification', {
-      id:        sendNoti._id,
-      user:      sendNoti.user,
-      partner:   sendNoti.partner,
-      role:      sendNoti.role,
-      message:   sendNoti.message,
-      type:      sendNoti.type,
-      status:    sendNoti.status,
-      createdAt: sendNoti.createdAt
     });
 
     return res.json({ request });
@@ -816,47 +632,42 @@ app.post('/friend-request',authMiddleware, async (req, res) => {
   }
 });
 
+
+
 // === RUTA ACTUALIZADA DE ACEPTAR SOLICITUD ===
-app.post('/friend-request/:id/accept',authMiddleware, async (req, res) => {
+// --- Ruta actualizada de aceptar solicitud ---
+app.post('/friend-request/:id/accept', async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
-  if (req.user.id !== reqDoc.to.toString()) {
-    return res.status(403).json({ error: 'No autorizado para aceptar esta solicitud' });
-  }
-
   try {
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-      // Validar que el usuario autenticado sea el receptor (“to”)
-    if (req.user.id !== reqDoc.to.toString()) {
-    return res.status(403).json({ error: 'No autorizado para aceptar esta solicitud' });
-    }
-
-    // Cambiar estado de la solicitud
+    // 1) Cambiar estado de la solicitud
     reqDoc.status = 'accepted';
     await reqDoc.save();
 
     const { from, to } = reqDoc;
 
-    // Agregar a amigos mutuamente
+    // 2) Agregar a amigos mutuamente
     await Promise.all([
       Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
 
+    // 3) Obtener datos para armar los mensajes
     const userFrom = await Usuario.findById(from).select('nombre apodo');
-    const userTo = await Usuario.findById(to).select('nombre apodo');
+    const userTo   = await Usuario.findById(to).select('nombre apodo');
 
-    // Actualizar notificación del EMISOR (sender) a aceptada
-    const updateSend = await Notification.findOneAndUpdate(
+    // 4) Actualizar la notificación del EMISOR (el que envió la solicitud)
+    await Notification.findOneAndUpdate(
       {
-        user:            from,
-        partner:         to,
+        user:            from,          // el “from” original
+        partner:         to,            // el “to” original
         type:            'friend_request',
         status:          'pendiente',
         friendRequestId: id
@@ -869,36 +680,16 @@ app.post('/friend-request/:id/accept',authMiddleware, async (req, res) => {
       },
       { new: true }
     );
-    io.to(from.toString()).emit('newNotification', {
-      id:        updateSend._id,
-      user:      updateSend.user,
-      partner:   updateSend.partner,
-      role:      updateSend.role,
-      message:   updateSend.message,
-      type:      updateSend.type,
-      status:    updateSend.status,
-      createdAt: updateSend.createdAt
-    });
 
-    // Crear notificación para el RECEPTOR (receiver) de aceptación
-    const recvNoti = await Notification.create({
-      user:            to,
-      partner:         from,
-      role:            'receiver',
+    // 5) Crear la nueva notificación para el RECEPTOR (quien acaba de aceptar)
+    await Notification.create({
+      user:            to,                    // el receptor original
+      partner:         from,                  // quien envió la solicitud
+      role:            'receiver',            // <--- aquí agregamos `role`
       friendRequestId: id,
       message:         `Has aceptado la solicitud de amistad de ${userFrom.nombre}`,
       type:            'friend_request',
       status:          'aceptada'
-    });
-    io.to(to.toString()).emit('newNotification', {
-      id:        recvNoti._id,
-      user:      recvNoti.user,
-      partner:   recvNoti.partner,
-      role:      recvNoti.role,
-      message:   recvNoti.message,
-      type:      recvNoti.type,
-      status:    recvNoti.status,
-      createdAt: recvNoti.createdAt
     });
 
     return res.json({ message: 'Solicitud aceptada' });
@@ -911,30 +702,34 @@ app.post('/friend-request/:id/accept',authMiddleware, async (req, res) => {
 
 
 
-
 // === RUTA ACTUALIZADA DE RECHAZAR SOLICITUD ===
-app.post('/friend-request/:id/reject', authMiddleware, async (req, res) => {
+app.post('/friend-request/:id/reject', async (req, res) => {
   const { id } = req.params;
+
+  // 1) Validar ID de solicitud
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
 
   try {
+    // 2) Buscar y verificar estado pending
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-    // Cambiar estado a 'rejected'
+    // 3) Cambiar estado a 'rejected'
     reqDoc.status = 'rejected';
     await reqDoc.save();
 
     const { from, to } = reqDoc;
-    const userFrom = await Usuario.findById(from).select('nombre apodo');
-    const userTo = await Usuario.findById(to).select('nombre apodo');
 
-    // Actualizar la notificación del EMISOR (sender) a rechazada
-    const updateSend = await Notification.findOneAndUpdate(
+    // Obtener datos de nombre/apodo
+    const userFrom = await Usuario.findById(from).select('nombre apodo');
+    const userTo   = await Usuario.findById(to).select('nombre apodo');
+
+    // 4) Actualizar la notificación del emisor (user: from)
+    await Notification.findOneAndUpdate(
       {
         user:            from,
         partner:         to,
@@ -950,36 +745,15 @@ app.post('/friend-request/:id/reject', authMiddleware, async (req, res) => {
       },
       { new: true }
     );
-    io.to(from.toString()).emit('newNotification', {
-      id:        updateSend._id,
-      user:      updateSend.user,
-      partner:   updateSend.partner,
-      role:      updateSend.role,
-      message:   updateSend.message,
-      type:      updateSend.type,
-      status:    updateSend.status,
-      createdAt: updateSend.createdAt
-    });
 
-    // Crear notificación para el RECEPTOR (receiver) de rechazo
-    const recvNoti = await Notification.create({
+    // 5) Crear nueva notificación para el receptor (user: to)
+    await Notification.create({
       user:            to,
       partner:         from,
-      role:            'receiver',
       friendRequestId: id,
       message:         `Has rechazado la solicitud de amistad de ${userFrom.nombre}`,
       type:            'friend_request',
       status:          'rechazada'
-    });
-    io.to(to.toString()).emit('newNotification', {
-      id:        recvNoti._id,
-      user:      recvNoti.user,
-      partner:   recvNoti.partner,
-      role:      recvNoti.role,
-      message:   recvNoti.message,
-      type:      recvNoti.type,
-      status:    recvNoti.status,
-      createdAt: recvNoti.createdAt
     });
 
     return res.json({ message: 'Solicitud rechazada' });
@@ -989,35 +763,26 @@ app.post('/friend-request/:id/reject', authMiddleware, async (req, res) => {
   }
 });
 
-// === OBTENER LISTA DE AMIGOS ===
-app.get('/friend-requests', authMiddleware, async (req, res) => {
-  const { userId } = req.query;
 
-  // Validar que vienen userId y coincide con el token
-  if (!req.query.userId || req.user.id !== req.query.userId) {
-    return res.status(403).json({ error: 'No autorizado para ver estas solicitudes' });
-  }
-  if (!mongoose.Types.ObjectId.isValid(userId)) {
+
+// === OBTENER LISTA DE AMIGOS ===
+app.get('/friends', async (req, res) => {
+  const { userId } = req.query;
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID inválido o faltante' });
   }
-
   try {
-    const requests = await FriendRequest.find({ to: userId, status: 'pending' })
-      .populate('from', 'nombre apellido apodo _id');
-    return res.json({ requests });
+    const user = await Usuario.findById(userId).populate('friends', 'nombre apellido apodo _id');
+    res.json({ friends: user ? user.friends : [] });
   } catch (err) {
-    console.error('[friend-requests] error:', err);
-    return res.status(500).json({ error: 'Error interno al obtener solicitudes' });
+    console.error('[friends/get] error:', err);
+    res.status(500).json({ error: 'Error interno al obtener amigos' });
   }
 });
 
-
 // === ELIMINAR AMISTAD ===
-app.post('/friend-remove',authMiddleware, async (req, res) => {
+app.post('/friend-remove', async (req, res) => {
   const { userId, friendId } = req.body;
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para eliminar esta amistad' });
-  }
   if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(friendId)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
@@ -1041,7 +806,7 @@ app.post('/friend-remove',authMiddleware, async (req, res) => {
 });
 
 // === BLOQUEAR USUARIO ===
-app.post('/user-block', authMiddleware ,async (req, res) => {
+app.post('/user-block', async (req, res) => {
   const { blocker, blocked } = req.body;
   if (!mongoose.Types.ObjectId.isValid(blocker) || !mongoose.Types.ObjectId.isValid(blocked)) {
     return res.status(400).json({ error: 'ID inválido' });
@@ -1066,11 +831,8 @@ app.post('/user-block', authMiddleware ,async (req, res) => {
 });
 
 // === DESBLOQUEAR USUARIO ===
-app.post('/user-unblock',authMiddleware, async (req, res) => {
+app.post('/user-unblock', async (req, res) => {
   const { unblocker, unblocked } = req.body;
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para eliminar esta amistad' });
-  }
   if (!mongoose.Types.ObjectId.isValid(unblocker) || !mongoose.Types.ObjectId.isValid(unblocked)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
@@ -1084,7 +846,7 @@ app.post('/user-unblock',authMiddleware, async (req, res) => {
 });
 
 // === OBTENER USUARIOS BLOQUEADOS ===
-app.get('/user-blocked',authMiddleware , async (req, res) => {
+app.get('/user-blocked', async (req, res) => {
   const { userId } = req.query;
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID inválido o faltante' });
@@ -1099,32 +861,11 @@ app.get('/user-blocked',authMiddleware , async (req, res) => {
 });
 
 
-app.get('/friends', authMiddleware, async (req, res) => {
-  const { userId } = req.query;
-  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-    return res.status(400).json({ error: 'ID inválido o faltante' });
-  }
-  // Verificar que userId coincide con el token
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para ver esta lista de amigos' });
-  }
-  try {
-    const user = await Usuario.findById(userId).populate('friends', 'nombre apellido apodo _id');
-    return res.json({ friends: user ? user.friends : [] });
-  } catch (err) {
-    console.error('[friends/get] error:', err);
-    return res.status(500).json({ error: 'Error interno al obtener amigos' });
-  }
-});
-
 
 // === NUEVO ENDPOINT: GUARDAR HISTORIAL DE OFERTAS ===
-app.post('/api/offers',authMiddleware, async (req, res) => {
+app.post('/api/offers', async (req, res) => {
   // Desestructuramos también `mode` que es obligatorio en el esquema
   const { sellerId, buyerId, buyerName, amount, mode, date, cards } = req.body;
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para eliminar esta amistad' });
-  }
 
   // Validaciones básicas
   if (
@@ -1150,23 +891,20 @@ app.post('/api/offers',authMiddleware, async (req, res) => {
 });
 
 // === Endpoint para obtener historial de ofertas de un usuario ===
-app.get('/api/offers', authMiddleware, async (req, res) => {
-  // No usar req.query.userId: mejor usar el que viene en el token
-  const sellerId = req.user.id;
-
-  if (!mongoose.Types.ObjectId.isValid(sellerId)) {
+app.get('/api/offers', async (req, res) => {
+  const { userId } = req.query;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'ID de usuario inválido' });
   }
-
   try {
-    const offers = await Offer.find({ sellerId }).sort({ date: -1 });
+    // Filtramos por sellerId (obras vendidas por el usuario)
+    const offers = await Offer.find({ sellerId: userId }).sort({ date: -1 });
     return res.json({ offers });
   } catch (err) {
     console.error('[offers/get]', err);
     return res.status(500).json({ error: 'Error interno al obtener historial' });
   }
 });
-
 
 
 
@@ -1177,31 +915,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Error interno', mensaje: err.message });
 });
 
-// -------------------- INTEGRACIÓN DE SOCKET.IO --------------------
-// Al final del archivo:
-const http = require('http');
-const { Server } = require('socket.io');
-
-// …[todas las rutas y middlewares arriba]…
-
+// Iniciar servidor
 const PORT = process.env.PORT || 3000;
-const server = http.createServer(app);
-
-const io = new Server(server, {
-  cors: { origin: '*' }  // ← restringir a tu frontend
-});
-
-io.on('connection', socket => {
-  console.log('🔌 Cliente conectado:', socket.id);
-  socket.on('registerUser', userId => {
-    socket.join(userId);
-    console.log(`🆔 Usuario ${userId} registrado en la sala ${userId}`);
-  });
-  socket.on('disconnect', () => {
-    console.log('❌ Cliente desconectado:', socket.id);
-  });
-});
-
-server.listen(PORT, () => {
-  console.log(`🚀 Servidor (Express + Socket.IO) corriendo en puerto ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Servidor corriendo en puerto ${PORT}`));
