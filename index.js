@@ -526,19 +526,19 @@ app.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
 
-    // Generar payload mínimo (puedes agregar más campos si lo crees necesario)
+    // Generar payload mínimo para el JWT
     const payload = {
       userId: u._id.toString(),
-      apodo:  u.apodo
+      apodo: u.apodo
     };
 
-    // Firmar el token con la clave secreta. Se recomienda un expiración, e.g. 1 día
+    // Firmar el token con tu clave secreta y expiración (por ejemplo, 1 día)
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
 
-    // Enviar el token al cliente junto con los datos de usuario
+    // Ahora devolvemos tanto el token como los datos del usuario
     return res.json({
       message: 'Inicio de sesión exitoso',
-      token,
+      token,  // <— aquí está el campo que tu app cliente espera
       usuario: {
         id:      u._id,
         apodo:   u.apodo,
@@ -552,6 +552,7 @@ app.post('/login', async (req, res) => {
     return res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
   }
 });
+
 
 
 
