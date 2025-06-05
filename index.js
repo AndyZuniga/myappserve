@@ -424,6 +424,26 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
 });
 
 
+// backend, justo después de app.patch('/notifications/:id/respond', …)
+app.patch('/notifications/:id/read', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const noti = await Notification.findById(id);
+    if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
+    // Verificamos que el usuario autenticado sea el destinatario
+    if (req.user.id !== noti.user.toString()) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+    noti.isRead = true;
+    await noti.save();
+    return res.json({ message: 'Marcada como leída' });
+  } catch (err) {
+    console.error('[notifications/read]', err);
+    return res.status(500).json({ error: 'Error interno al marcar como leída' });
+  }
+});
+
+
 
 
 
