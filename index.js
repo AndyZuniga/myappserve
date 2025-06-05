@@ -1,10 +1,10 @@
 const express = require('express');
 const cors = require('cors');            // ← IMPORTAR CORS aquí
-const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 require('dotenv').config();
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'Aatrox2887Andy9881';
 const http = require('http');
