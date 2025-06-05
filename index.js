@@ -393,7 +393,8 @@ app.post('/login', async (req, res) => {
         id: u._id,
         apodo: u.apodo,
         correo: u.correo,
-        nombre: u.nombre
+        nombre: u.nombre,
+        apellido: u.apellido
       }
     });
   } catch (err) {
