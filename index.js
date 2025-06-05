@@ -502,7 +502,9 @@ app.get('/verify-token', async (req, res) => {
   }
 });
 
-// Autenticación estándar
+// ====================
+//   Ruta de LOGIN
+// ====================
 app.post('/login', async (req, res) => {
   const { correo, password } = req.body;
   if (!correo || !password) {
@@ -514,24 +516,33 @@ app.post('/login', async (req, res) => {
     if (!u) {
       return res.status(400).json({ error: 'Correo no registrado' });
     }
+
+    // Verificar que la cuenta esté confirmada
     if (!u.verificado) {
       return res.status(403).json({ error: 'Cuenta no verificada. Revisa tu correo.' });
     }
 
+    // Comparar contraseña
     const match = await bcrypt.compare(password, u.password);
     if (!match) {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
 
-    // Generar el payload para el JWT
-    const payload = { userId: u._id.toString(), apodo: u.apodo };
-    // Firmar el token
+    // Generar payload mínimo para el JWT
+    const payload = {
+      userId: u._id.toString(),
+      apodo:  u.apodo
+    };
+
+    // Firmar el token con la clave secreta (aquí aseguramos que expire en 1 día)
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
 
-    // ¡Aquí es donde devolvemos el token y el usuario!
-    return res.json({
+    // *******************
+    //  ACA SE AGREGARÁ token
+    // *******************
+    return res.status(200).json({
       message: 'Inicio de sesión exitoso',
-      token,   // <--- ESTE CAMPO ES OBLIGATORIO
+      token,   // <— Asegúrate de incluir este campo
       usuario: {
         id:      u._id,
         apodo:   u.apodo,
@@ -545,6 +556,7 @@ app.post('/login', async (req, res) => {
     return res.status(500).json({ error: 'Error al iniciar sesión', detalles: err.message });
   }
 });
+
 
 
 app.get('/usuarios', async (req, res) => {
