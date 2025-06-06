@@ -7,7 +7,6 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'Aatrox2887Andy9881';
-const { Server } = require('socket.io');
 
 const app = express();
 app.use(express.json());
