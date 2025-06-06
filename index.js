@@ -537,18 +537,15 @@ app.post('/login', async (req, res) => {
     // Firmar el token con la clave secreta (aquí aseguramos que expire en 1 día)
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
 
-    // *******************
-    //  ACA SE AGREGARÁ token
-    // *******************
     return res.status(200).json({
       message: 'Inicio de sesión exitoso',
-      token,   // <— Asegúrate de incluir este campo
+      token,   
       usuario: {
         id:      u._id,
         apodo:   u.apodo,
         correo:  u.correo,
-        //nombre:  u.nombre,
-        //apellido:u.apellido
+        nombre:  u.nombre,
+        apellido:u.apellido
       }
     });
   } catch (err) {
