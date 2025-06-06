@@ -7,7 +7,6 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'Aatrox2887Andy9881';
-const http = require('http');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -501,7 +500,9 @@ app.get('/verify-token', async (req, res) => {
     res.status(500).json({ error: 'Error al verificar token', detalles: err.message });
   }
 });
-
+// ====================
+//   Ruta de LOGIN
+// ====================
 // ====================
 //   Ruta de LOGIN
 // ====================
