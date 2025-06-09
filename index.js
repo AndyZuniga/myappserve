@@ -813,6 +813,50 @@ app.post('/friend-request',authMiddleware, async (req, res) => {
   }
 });
 
+
+// === Solicitudes enviadas por mí ===
+app.get('/friend-requests/sent', authMiddleware, async (req, res) => {
+  const { userId } = req.query;
+  // 1) Validaciones
+  if (!mongoose.Types.ObjectId.isValid(userId))
+    return res.status(400).json({ error: 'ID inválido' });
+  if (req.user.id !== userId)
+    return res.status(403).json({ error: 'No autorizado' });
+
+  try {
+    // 2) Buscar solicitudes donde yo soy el emisor
+    const requests = await FriendRequest
+      .find({ from: userId, status: 'pending' })
+      .populate('to', 'nombre apellido apodo _id');
+
+    return res.json({ requests });
+  } catch (err) {
+    console.error('[friend-requests/sent] error:', err);
+    return res.status(500).json({ error: 'Error interno al obtener solicitudes enviadas' });
+  }
+});
+
+// === (Opcional) Solicitudes recibidas para mí ===
+app.get('/friend-requests/received', authMiddleware, async (req, res) => {
+  const { userId } = req.query;
+  if (!mongoose.Types.ObjectId.isValid(userId))
+    return res.status(400).json({ error: 'ID inválido' });
+  if (req.user.id !== userId)
+    return res.status(403).json({ error: 'No autorizado' });
+
+  try {
+    const requests = await FriendRequest
+      .find({ to: userId, status: 'pending' })
+      .populate('from', 'nombre apellido apodo _id');
+
+    return res.json({ requests });
+  } catch (err) {
+    console.error('[friend-requests/received] error:', err);
+    return res.status(500).json({ error: 'Error interno al obtener solicitudes recibidas' });
+  }
+});
+
+
 // === RUTA ACTUALIZADA DE ACEPTAR SOLICITUD ===
 app.post('/friend-request/:id/accept',authMiddleware, async (req, res) => {
   const { id } = req.params;
