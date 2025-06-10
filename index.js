@@ -12,8 +12,7 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: 'https://tu-frontend.com' })); // ← CORRECTO: cors ya existe
 
-const Usuario = require('./models/Usuario');
-const FriendRequest = require('./models/FriendRequest');
+
 // Conectar a MongoDB
 const MONGO_URI = process.env.MONGO_URI;
 mongoose
@@ -708,58 +707,25 @@ app.get('/library', authMiddleware, async (req, res) => {
   }
 });
 
-
-
-
-
-app.get('/users/search', authMiddleware, async (req, res) => {
-  const { query, userId } = req.query;
-  if (!query) {
-    return res.status(400).json({ error: 'Falta parámetro "query"' });
-  }
-
-  // Validar formato de userId y autorización
-  if (
-    !mongoose.Types.ObjectId.isValid(userId) ||
-    req.user.id !== userId
-  ) {
-    return res.status(403).json({ error: 'No autorizado' });
-  }
-
+// 👥 Buscar usuarios
+app.get('/users/search', async (req, res) => {
+  const { query } = req.query;
+  if (!query) return res.status(400).json({ error: 'Falta query' });
   const regex = new RegExp(query, 'i');
   try {
-    // 1) Buscar usuarios que coincidan con el término
     const users = await Usuario.find({
       $or: [
         { nombre:  regex },
         { apellido: regex },
         { apodo:   regex }
       ]
-    }).select('nombre apellido apodo correo');
-
-    // 2) Cargar solicitudes pendientes enviadas por este usuario
-    const pendings = await FriendRequest
-      .find({ from: userId, status: 'pending' })
-      .select('to');
-    const pendingIds = pendings.map(r => r.to.toString());
-
-    // 3) Inyectar flag isPending en cada usuario
-    const usersWithStatus = users.map(u => ({
-      _id:       u._id,
-      nombre:    u.nombre,
-      apellido:  u.apellido,
-      apodo:     u.apodo,
-      correo:    u.correo,
-      isPending: pendingIds.includes(u._id.toString()),
-    }));
-
-    return res.json({ users: usersWithStatus });
+    }).select('nombre apellido apodo _id correo');
+    res.json({ users });
   } catch (err) {
     console.error('[users/search]', err);
-    return res.status(500).json({ error: 'Error interno en búsqueda' });
+    res.status(500).json({ error: 'Error interno en búsqueda' });
   }
 });
-
 
 // === Obtener solicitudes de amistad pendientes para un usuario ===
 app.get('/friend-requests', authMiddleware, async (req, res) => {
