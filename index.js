@@ -1030,27 +1030,7 @@ app.post('/friend-request/:id/reject', authMiddleware, async (req, res) => {
   }
 });
 
-// === OBTENER LISTA DE AMIGOS ===
-app.get('/friend-requests', authMiddleware, async (req, res) => {
-  const { userId } = req.query;
 
-  // Validar que vienen userId y coincide con el token
-  if (!req.query.userId || req.user.id !== req.query.userId) {
-    return res.status(403).json({ error: 'No autorizado para ver estas solicitudes' });
-  }
-  if (!mongoose.Types.ObjectId.isValid(userId)) {
-    return res.status(400).json({ error: 'ID inválido o faltante' });
-  }
-
-  try {
-    const requests = await FriendRequest.find({ to: userId, status: 'pending' })
-      .populate('from', 'nombre apellido apodo _id');
-    return res.json({ requests });
-  } catch (err) {
-    console.error('[friend-requests] error:', err);
-    return res.status(500).json({ error: 'Error interno al obtener solicitudes' });
-  }
-});
 
 
 // === ELIMINAR AMISTAD ===
