@@ -1,34 +1,46 @@
-const express = require('express');
-const cors = require('cors');            // ← IMPORTAR CORS aquí
-const mongoose = require('mongoose');
-const nodemailer = require('nodemailer');
-const crypto = require('crypto');
+const express     = require('express');
+const cors        = require('cors');
+const mongoose    = require('mongoose');
+const nodemailer  = require('nodemailer');
+const crypto      = require('crypto');
 require('dotenv').config();
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'Aatrox2887Andy9881';
+const bcrypt      = require('bcryptjs');
+const jwt         = require('jsonwebtoken');
+
+// Validar variables de entorno críticas
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL ERROR: JWT_SECRET no está definida en el entorno.');
+  process.exit(1);
+}
+if (!process.env.MONGO_URI) {
+  console.error('FATAL ERROR: MONGO_URI no está definida en el entorno.');
+  process.exit(1);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const MONGO_URI  = process.env.MONGO_URI;
+
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: 'https://tu-frontend.com' })); // ← CORRECTO: cors ya existe
-
+app.use(cors({ origin: 'https://tu-frontend.com' }));
 
 // Conectar a MongoDB
-const MONGO_URI = process.env.MONGO_URI;
 mongoose
   .connect(MONGO_URI)
   .then(() => console.log('✅ Conectado a MongoDB Atlas'))
-  .catch(err => console.error('❌ Error al conectar a MongoDB:', err));
+  .catch(err => {
+    console.error('❌ Error al conectar a MongoDB:', err);
+    process.exit(1);
+  });
 
 // Middleware para verificar JWT
 function authMiddleware(req, res, next) {
-  // El token debe enviarse en el header "Authorization: Bearer <token>"
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     return res.status(401).json({ error: 'Token no proporcionado' });
   }
 
-  // Separar "Bearer" del token real
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
     return res.status(401).json({ error: 'Formato de token inválido' });
@@ -36,17 +48,13 @@ function authMiddleware(req, res, next) {
 
   const token = parts[1];
   try {
-    // Verificar firma y extraer payload
     const decoded = jwt.verify(token, JWT_SECRET);
-    // Guardar información útil en req.user para las rutas
     req.user = { id: decoded.userId, apodo: decoded.apodo };
-    return next();
+    next();
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }
 }
-
-
 
 
 
@@ -78,8 +86,11 @@ const offerSchema = new mongoose.Schema({
 const Offer = mongoose.model('offer', offerSchema);
 
 // --- Envío de enlaces de verificación ---
+const APP_BASE_URL = process.env.APP_BASE_URL || 'https://myappserve-go.onrender.com';
+
 const sendVerificationLink = async (correo, token) => {
-  const link = `https://myappserve-go.onrender.com/open-app?token=${token}`;
+  const safeToken = encodeURIComponent(token);
+  const link = `${APP_BASE_URL}/open-app?token=${safeToken}`;
   await transporter.sendMail({
     from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
     to: correo,
@@ -91,14 +102,33 @@ const sendVerificationLink = async (correo, token) => {
   });
 };
 
+
+// Ruta de deep link para verificación
 // Ruta de deep link para verificación
 app.get('/open-app', (req, res) => {
   const { token } = req.query;
-  if (!token) return res.status(400).send('Token faltante');
-  res.send(`<html><head>
-    <meta http-equiv="refresh" content="0; url=setmatch://verificar?token=${token}" />
-  </head><body><p>Redirigiendo a la app...</p></body></html>`);
+  if (!token) {
+    return res.status(400).send('Token faltante');
+  }
+
+  const safeToken = encodeURIComponent(token);
+  const deepLink = `setmatch://verificar?token=${safeToken}`;
+
+  res.send(`<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Redirigiendo…</title>
+  <meta http-equiv="refresh" content="0;url=${deepLink}" />
+  <script>window.location.href='${deepLink}';</script>
+</head>
+<body>
+  <p>Redirigiendo a la app…</p>
+  <p>Si no funciona automáticamente, <a href="${deepLink}">haz clic aquí</a>.</p>
+</body>
+</html>`);
 });
+
 
 // Esquema de usuario temporal
 const pendingUserSchema = new mongoose.Schema({
@@ -167,7 +197,6 @@ notificationSchema.index({ user: 1, isRead: 1 });
 
 const Notification = mongoose.model('notification', notificationSchema);
 
-// === CREAR NOTIFICACIÓN (general) ===
 // === CREAR NOTIFICACIÓN (general) – ahora con “role” obligatorio ===
 app.post('/notifications', authMiddleware, async (req, res) => {
   const { userId, partner, role, message, type, cards, amount } = req.body;
@@ -332,33 +361,35 @@ app.get('/notifications', authMiddleware, async (req, res) => {
 });
 
 
-
-
 // Responder oferta: cambia estado en ambas notificaciones (receptor y emisor)
 app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
-  // 1) Extraemos el id de los parámetros
   const { id } = req.params;
 
-  // 2) Buscamos la notificación y validamos que exista
-  const noti = await Notification.findById(id);
-  if (!noti) {
-    return res.status(404).json({ error: 'Notificación no encontrada' });
-  }
-
-  // 3) Validamos que el usuario autenticado sea el destinatario de esta notificación
-  if (req.user.id !== noti.user.toString()) {
-    return res.status(403).json({ error: 'No autorizado para responder esta notificación' });
-  }
-
-  // 4) Extraemos action y byApodo del cuerpo
-  const { action, byApodo } = req.body; // action: 'accept' | 'reject'
-  if (!['accept', 'reject'].includes(action)) {
-    return res.status(400).json({ error: 'Acción inválida' });
-  }
-  const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
-
   try {
-    // 5) Actualizamos la propia notificación
+    // 1) Validar formato de ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    // 2) Buscar notificación
+    const noti = await Notification.findById(id);
+    if (!noti) {
+      return res.status(404).json({ error: 'Notificación no encontrada' });
+    }
+
+    // 3) Verificar que el usuario autenticado sea el destinatario
+    if (req.user.id !== noti.user.toString()) {
+      return res.status(403).json({ error: 'No autorizado para responder esta notificación' });
+    }
+
+    // 4) Validar acción
+    const { action, byApodo } = req.body; // action: 'accept' | 'reject'
+    if (!['accept', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'Acción inválida' });
+    }
+    const newStatus = action === 'accept' ? 'aceptada' : 'rechazada';
+
+    // 5) Actualizar la propia notificación
     noti.message   = action === 'accept'
                       ? `Has aceptado la oferta de ${byApodo}`
                       : `Rechazaste la oferta de ${byApodo}`;
@@ -367,7 +398,7 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
     noti.createdAt = new Date();
     await noti.save();
 
-    // 6) Emitimos evento WebSocket al receptor original
+    // 6) Emitir evento WebSocket al receptor original
     io.to(noti.user.toString()).emit('newNotification', {
       id:        noti._id,
       user:      noti.user,
@@ -381,7 +412,7 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
       createdAt: noti.createdAt
     });
 
-    // 7) Buscamos y actualizamos la notificación contrapartida (emisor)
+    // 7) Buscar y actualizar la notificación contrapartida (emisor)
     const counterpart = await Notification.findOne({
       user:    noti.partner,
       partner: noti.user,
@@ -389,7 +420,6 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
       amount:  noti.amount,
       'cards.cardId': { $in: noti.cards.map(c => c.cardId) }
     });
-
     if (counterpart) {
       counterpart.message   = action === 'accept'
                               ? `Tu oferta ha sido aceptada por ${byApodo}`
@@ -399,7 +429,7 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
       counterpart.createdAt = new Date();
       await counterpart.save();
 
-      // 8) Emitimos evento WebSocket al emisor original
+      // 8) Emitir evento WebSocket al emisor original
       io.to(counterpart.user.toString()).emit('newNotification', {
         id:        counterpart._id,
         user:      counterpart.user,
@@ -420,30 +450,6 @@ app.patch('/notifications/:id/respond', authMiddleware, async (req, res) => {
     return res.status(500).json({ error: 'Error interno al actualizar notificación' });
   }
 });
-
-
-// backend, justo después de app.patch('/notifications/:id/respond', …)
-app.patch('/notifications/:id/read', authMiddleware, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const noti = await Notification.findById(id);
-    if (!noti) return res.status(404).json({ error: 'Notificación no encontrada' });
-    // Verificamos que el usuario autenticado sea el destinatario
-    if (req.user.id !== noti.user.toString()) {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-    noti.isRead = true;
-    await noti.save();
-    return res.json({ message: 'Marcada como leída' });
-  } catch (err) {
-    console.error('[notifications/read]', err);
-    return res.status(500).json({ error: 'Error interno al marcar como leída' });
-  }
-});
-
-
-
-
 
 
 // === REGISTRO Y VERIFICACIÓN ===
@@ -474,11 +480,7 @@ app.post('/register-request', async (req, res) => {
     res.status(500).json({ error: 'Error al procesar registro', detalles: err.message });
   }
 });
-//aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-//aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-//aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-//aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-//aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
 app.get('/verify-token', async (req, res) => {
   const { token } = req.query;
   try {
@@ -499,9 +501,7 @@ app.get('/verify-token', async (req, res) => {
     res.status(500).json({ error: 'Error al verificar token', detalles: err.message });
   }
 });
-// ====================
-//   Ruta de LOGIN
-// ====================
+
 // ====================
 //   Ruta de LOGIN
 // ====================
@@ -575,7 +575,7 @@ app.post('/forgot-password', async (req, res) => {
     u.tokenReset  = token;
     u.tokenExpira = new Date(Date.now() + 10 * 60 * 1000);
     await u.save();
-    const link = `https://myappserve-go.onrender.com/reset-redirect?token=${token}`;
+    const link = `${APP_BASE_URL}/reset-redirect?token=${encodeURIComponent(token)}`;
     await transporter.sendMail({
       from: `"SetMatch Soporte" <${process.env.EMAIL_USER}>`,
       to: correo,
@@ -591,9 +591,28 @@ app.post('/forgot-password', async (req, res) => {
 
 app.get('/reset-redirect', (req, res) => {
   const { token } = req.query;
-  if (!token) return res.status(400).send('Token faltante');
-  res.send(`<html><head><meta http-equiv="refresh" content="0; url=setmatch://restablecer?token=${token}" /></head><body><p>Redirigiendo a la app...</p></body></html>`);
+  if (!token) {
+    return res.status(400).send('Token faltante');
+  }
+
+  const deepLink = `setmatch://restablecer?token=${encodeURIComponent(token)}`;
+  res.send(`<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Redirigiendo…</title>
+  <!-- Meta-refresh correctamente formateado -->
+  <meta http-equiv="refresh" content="0;url=${deepLink}" />
+  <!-- Fallback JavaScript -->
+  <script>window.location.href='${deepLink}';</script>
+</head>
+<body>
+  <p>Redirigiendo a la app…</p>
+  <p>Si no funciona automáticamente, <a href="${deepLink}">haz clic aquí</a>.</p>
+</body>
+</html>`);
 });
+
 
 app.post('/reset-password', async (req, res) => {
   const { token, nuevaPassword } = req.body;
@@ -858,56 +877,45 @@ app.get('/friend-requests/received', authMiddleware, async (req, res) => {
 
 
 // === RUTA ACTUALIZADA DE ACEPTAR SOLICITUD ===
-app.post('/friend-request/:id/accept',authMiddleware, async (req, res) => {
+app.post('/friend-request/:id/accept', authMiddleware, async (req, res) => {
   const { id } = req.params;
+
+  // 1) Validar formato de ID
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'ID de solicitud inválido' });
   }
-  if (req.user.id !== reqDoc.to.toString()) {
-    return res.status(403).json({ error: 'No autorizado para aceptar esta solicitud' });
-  }
 
   try {
+    // 2) Obtener solicitud
     const reqDoc = await FriendRequest.findById(id);
     if (!reqDoc || reqDoc.status !== 'pending') {
       return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' });
     }
 
-      // Validar que el usuario autenticado sea el receptor (“to”)
+    // 3) Verificar que el usuario autenticado sea el receptor (“to”)
     if (req.user.id !== reqDoc.to.toString()) {
-    return res.status(403).json({ error: 'No autorizado para aceptar esta solicitud' });
+      return res.status(403).json({ error: 'No autorizado para aceptar esta solicitud' });
     }
 
-    // Cambiar estado de la solicitud
+    // 4) Cambiar estado de la solicitud
     reqDoc.status = 'accepted';
     await reqDoc.save();
 
     const { from, to } = reqDoc;
 
-    // Agregar a amigos mutuamente
+    // 5) Agregar a amigos mutuamente
     await Promise.all([
       Usuario.findByIdAndUpdate(from, { $addToSet: { friends: to } }),
       Usuario.findByIdAndUpdate(to,   { $addToSet: { friends: from } })
     ]);
 
     const userFrom = await Usuario.findById(from).select('nombre apodo');
-    const userTo = await Usuario.findById(to).select('nombre apodo');
+    const userTo   = await Usuario.findById(to).select('nombre apodo');
 
-    // Actualizar notificación del EMISOR (sender) a aceptada
+    // 6) Actualizar notificación del EMISOR a “aceptada”
     const updateSend = await Notification.findOneAndUpdate(
-      {
-        user:            from,
-        partner:         to,
-        type:            'friend_request',
-        status:          'pendiente',
-        friendRequestId: id
-      },
-      {
-        message:   `Tu solicitud fue aceptada por ${userTo.nombre}`,
-        status:    'aceptada',
-        isRead:    false,
-        createdAt: new Date()
-      },
+      { user: from, partner: to, type: 'friend_request', status: 'pendiente', friendRequestId: id },
+      { message: `Tu solicitud fue aceptada por ${userTo.nombre}`, status: 'aceptada', isRead: false, createdAt: new Date() },
       { new: true }
     );
     io.to(from.toString()).emit('newNotification', {
@@ -921,7 +929,7 @@ app.post('/friend-request/:id/accept',authMiddleware, async (req, res) => {
       createdAt: updateSend.createdAt
     });
 
-    // Crear notificación para el RECEPTOR (receiver) de aceptación
+    // 7) Crear notificación para el RECEPTOR de aceptación
     const recvNoti = await Notification.create({
       user:            to,
       partner:         from,
@@ -948,8 +956,6 @@ app.post('/friend-request/:id/accept',authMiddleware, async (req, res) => {
     return res.status(500).json({ error: 'Error interno al aceptar solicitud' });
   }
 });
-
-
 
 
 
@@ -1138,39 +1144,38 @@ app.get('/friends', authMiddleware, async (req, res) => {
   }
 });
 
-
 // === NUEVO ENDPOINT: GUARDAR HISTORIAL DE OFERTAS ===
-app.post('/api/offers',authMiddleware, async (req, res) => {
+app.post('/api/offers', authMiddleware, async (req, res) => {
   // Desestructuramos también `mode` que es obligatorio en el esquema
   const { sellerId, buyerId, buyerName, amount, mode, date, cards } = req.body;
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para eliminar esta amistad' });
+
+  // 1) Verificar que el token coincide con sellerId
+  if (req.user.id !== sellerId) {
+    return res.status(403).json({ error: 'No autorizado para crear oferta para otro usuario' });
   }
 
-  // Validaciones básicas
+  // 2) Validaciones básicas
   if (
     !mongoose.Types.ObjectId.isValid(sellerId) ||
     !mongoose.Types.ObjectId.isValid(buyerId) ||
     typeof amount !== 'number' ||
-    !['trend','low','manual'].includes(mode) ||  // Validamos el modo
+    !['trend', 'low', 'manual'].includes(mode) ||
     !Array.isArray(cards)
   ) {
     return res.status(400).json({ error: 'Datos de oferta inválidos' });
   }
 
   try {
-    // Creamos el documento incluyendo `mode`
+    // 3) Creamos el documento incluyendo `mode`
     const offer = new Offer({ sellerId, buyerId, buyerName, amount, mode, date, cards });
     await offer.save();
     return res.status(201).json({ offer });
   } catch (err) {
     console.error('[offers/create]', err);
-    // Devolvemos el mensaje real de error para depuración
     return res.status(500).json({ error: err.message });
   }
 });
 
-// === Endpoint para obtener historial de ofertas de un usuario ===
 app.get('/api/offers', authMiddleware, async (req, res) => {
   // No usar req.query.userId: mejor usar el que viene en el token
   const sellerId = req.user.id;
