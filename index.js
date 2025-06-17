@@ -1093,22 +1093,33 @@ app.post('/user-block', authMiddleware ,async (req, res) => {
 });
 
 // === DESBLOQUEAR USUARIO ===
-app.post('/user-unblock',authMiddleware, async (req, res) => {
-  const { unblocker, unblocked } = req.body;
-  if (req.user.id !== userId) {
-    return res.status(403).json({ error: 'No autorizado para eliminar esta amistad' });
-  }
-  if (!mongoose.Types.ObjectId.isValid(unblocker) || !mongoose.Types.ObjectId.isValid(unblocked)) {
+app.post('/user-unblock', authMiddleware, async (req, res) => {
+  // Derivamos unblocker directamente del token validado
+  const unblocker = req.user.id;
+  const { unblocked } = req.body;
+
+  // Validación de ID
+  if (!mongoose.Types.ObjectId.isValid(unblocked)) {
     return res.status(400).json({ error: 'ID inválido' });
   }
+
   try {
-    await Usuario.findByIdAndUpdate(unblocker, { $pull: { blockedUsers: unblocked }});
-    res.json({ message: 'Usuario desbloqueado' });
+    // Eliminamos el userId del array blockedUsers
+    const result = await Usuario.findByIdAndUpdate(
+      unblocker,
+      { $pull: { blockedUsers: unblocked } },
+      { new: true }                // opcional, para devolver el documento actualizado
+    );
+    if (!result) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    return res.json({ message: 'Usuario desbloqueado' });
   } catch (err) {
     console.error('[user-unblock] error:', err);
-    res.status(500).json({ error: 'Error interno al desbloquear usuario' });
+    return res.status(500).json({ error: 'Error interno al desbloquear usuario' });
   }
 });
+
 
 // === OBTENER USUARIOS BLOQUEADOS ===
 app.get('/user-blocked',authMiddleware , async (req, res) => {
