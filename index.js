@@ -928,41 +928,64 @@ app.post('/friend-request/:id/accept', authMiddleware, async (req, res) => {
 
     // 6) Actualizar notificación del EMISOR a “aceptada”
     const updateSend = await Notification.findOneAndUpdate(
-      { user: from, partner: to, type: 'friend_request', status: 'pendiente', friendRequestId: id },
-      { message: `Tu solicitud fue aceptada por ${userTo.nombre}`, status: 'aceptada', isRead: false, createdAt: new Date() },
+      {
+        user: from,
+        partner: to,
+        type: 'friend_request',
+        status: 'pendiente',
+        friendRequestId: id
+      },
+      {
+        message:   `Tu solicitud fue aceptada por ${userTo.nombre}`,
+        status:    'aceptada',
+        isRead:    false,
+        createdAt: new Date()
+      },
       { new: true }
     );
-    io.to(from.toString()).emit('newNotification', {
-      id:        updateSend._id,
-      user:      updateSend.user,
-      partner:   updateSend.partner,
-      role:      updateSend.role,
-      message:   updateSend.message,
-      type:      updateSend.type,
-      status:    updateSend.status,
-      createdAt: updateSend.createdAt
-    });
+    if (updateSend) {
+      io.to(from.toString()).emit('newNotification', {
+        id:        updateSend._id,
+        user:      updateSend.user,
+        partner:   updateSend.partner,
+        role:      updateSend.role,
+        message:   updateSend.message,
+        type:      updateSend.type,
+        status:    updateSend.status,
+        createdAt: updateSend.createdAt
+      });
+    }
 
-    // 7) Crear notificación para el RECEPTOR de aceptación
-    const recvNoti = await Notification.create({
-      user:            to,
-      partner:         from,
-      role:            'receiver',
-      friendRequestId: id,
-      message:         `Has aceptado la solicitud de amistad de ${userFrom.nombre}`,
-      type:            'friend_request',
-      status:          'aceptada'
-    });
-    io.to(to.toString()).emit('newNotification', {
-      id:        recvNoti._id,
-      user:      recvNoti.user,
-      partner:   recvNoti.partner,
-      role:      recvNoti.role,
-      message:   recvNoti.message,
-      type:      recvNoti.type,
-      status:    recvNoti.status,
-      createdAt: recvNoti.createdAt
-    });
+    // 7) Actualizar notificación original del RECEPTOR a “aceptada”
+    const updateRecv = await Notification.findOneAndUpdate(
+      {
+        user:            to,
+        partner:         from,
+        type:            'friend_request',
+        status:          'pendiente',
+        friendRequestId: id,
+        role:            'receiver'
+      },
+      {
+        message:   `Has aceptado la solicitud de amistad de ${userFrom.nombre}`,
+        status:    'aceptada',
+        isRead:    false,
+        createdAt: new Date()
+      },
+      { new: true }
+    );
+    if (updateRecv) {
+      io.to(to.toString()).emit('newNotification', {
+        id:        updateRecv._id,
+        user:      updateRecv.user,
+        partner:   updateRecv.partner,
+        role:      updateRecv.role,
+        message:   updateRecv.message,
+        type:      updateRecv.type,
+        status:    updateRecv.status,
+        createdAt: updateRecv.createdAt
+      });
+    }
 
     return res.json({ message: 'Solicitud aceptada' });
   } catch (err) {
@@ -970,6 +993,7 @@ app.post('/friend-request/:id/accept', authMiddleware, async (req, res) => {
     return res.status(500).json({ error: 'Error interno al aceptar solicitud' });
   }
 });
+
 
 
 
