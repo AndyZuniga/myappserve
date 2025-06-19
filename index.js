@@ -726,25 +726,39 @@ app.get('/library', authMiddleware, async (req, res) => {
   }
 });
 
-// 👥 Buscar usuarios
-app.get('/users/search', async (req, res) => {
+// 👥 Buscar usuarios (con authMiddleware)
+app.get('/users/search', authMiddleware, async (req, res) => {
   const { query } = req.query;
   if (!query) return res.status(400).json({ error: 'Falta query' });
+  
+  // 1. Construir regex de búsqueda
   const regex = new RegExp(query, 'i');
+
   try {
+    // 2. Obtener lista de IDs bloqueados del usuario logueado
+    //    asumiendo que authMiddleware pone userId en req.user.id
+    const yo = await Usuario.findById(req.user.id).select('blockedUsers');
+    const bloqueados = yo.blockedUsers || [];
+
+    // 3. Buscar excluyendo los bloqueados
     const users = await Usuario.find({
       $or: [
         { nombre:  regex },
         { apellido: regex },
         { apodo:   regex }
-      ]
-    }).select('nombre apellido apodo _id correo');
+      ],
+      _id: { $nin: bloqueados }            // <-- filtro clave
+    })
+    .select('nombre apellido apodo _id correo')
+    .limit(20);
+
     res.json({ users });
   } catch (err) {
     console.error('[users/search]', err);
     res.status(500).json({ error: 'Error interno en búsqueda' });
   }
 });
+
 
 // === Obtener solicitudes de amistad pendientes para un usuario ===
 app.get('/friend-requests', authMiddleware, async (req, res) => {
