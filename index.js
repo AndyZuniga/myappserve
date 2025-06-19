@@ -1094,31 +1094,50 @@ app.post('/user-block', authMiddleware ,async (req, res) => {
 
 // === DESBLOQUEAR USUARIO ===
 app.post('/user-unblock', authMiddleware, async (req, res) => {
-  // Derivamos unblocker directamente del token validado
   const unblocker = req.user.id;
   const { unblocked } = req.body;
 
-  // Validación de ID
+  console.info(`[user-unblock] Solicitud de desbloqueo por ${unblocker}, target=${unblocked}`);
+
+  // 1) Validación de ID
   if (!mongoose.Types.ObjectId.isValid(unblocked)) {
-    return res.status(400).json({ error: 'ID inválido' });
+    console.warn(`[user-unblock] ID inválido: ${unblocked}`);
+    return res
+      .status(400)
+      .json({ success: false, message: 'ID de usuario inválido.' });
   }
 
   try {
-    // Eliminamos el userId del array blockedUsers
+    // 2) Operación de actualización
     const result = await Usuario.findByIdAndUpdate(
       unblocker,
       { $pull: { blockedUsers: unblocked } },
-      { new: true }                // opcional, para devolver el documento actualizado
+      { new: true }
     );
+
     if (!result) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+      console.warn(`[user-unblock] Usuario origin ${unblocker} no encontrado`);
+      return res
+        .status(404)
+        .json({ success: false, message: 'Usuario no encontrado.' });
     }
-    return res.json({ message: 'Usuario desbloqueado' });
+
+    console.info(
+      `[user-unblock] Éxito: bloqueados ahora = ${result.blockedUsers.join(', ')}`
+    );
+    return res.json({
+      success: true,
+      message: 'Usuario desbloqueado correctamente.',
+      data: { blockedUsers: result.blockedUsers }
+    });
   } catch (err) {
-    console.error('[user-unblock] error:', err);
-    return res.status(500).json({ error: 'Error interno al desbloquear usuario' });
+    console.error('[user-unblock] Error interno:', err);
+    return res
+      .status(500)
+      .json({ success: false, message: 'Error interno al desbloquear usuario.' });
   }
 });
+
 
 
 // === OBTENER USUARIOS BLOQUEADOS ===
