@@ -805,7 +805,8 @@ app.get('/tasks', authMiddleware, async (req, res) => {
         { createdBy: req.user.id },
         { assignee:  req.user.id }
       ]
-    }).populate('assignee', 'nombre apellido apodo');
+    }).populate('assignee', '_id nombre apellido apodo'); // <-- aquí
+
     res.json({ tasks });
   } catch (err) {
     console.error('[tasks/list]', err);
