@@ -817,6 +817,8 @@ app.get('/tasks', authMiddleware, async (req, res) => {
 // Actualizar estado (solo si es el encargado)
 app.patch('/tasks/:id/status', authMiddleware, async (req, res) => {
   const { status } = req.body;
+  console.log('Status recibido:', status);
+
   const validStatuses = ['no_realizada', 'incompleta', 'completada'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: 'Estado inválido' });
