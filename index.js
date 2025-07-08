@@ -817,25 +817,28 @@ app.get('/tasks', authMiddleware, async (req, res) => {
 // Actualizar estado (solo si es el encargado)
 app.patch('/tasks/:id/status', authMiddleware, async (req, res) => {
   const { status } = req.body;
-  const validStatuses = ['pendiente', 'en progreso', 'completada'];
+  const validStatuses = ['no_realizada', 'incompleta', 'completada'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: 'Estado inválido' });
   }
+
   try {
-    const task = await Task.findById(req.params.id);
+    const task = await Task.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
     if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
-    if (task.assignee?.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'No autorizado para actualizar esta tarea' });
-    }
-    task.status = status;
-    await task.save();
-    io.to(task.createdBy.toString()).emit('statusUpdated', task);
-    res.json(task);
+
+    io.emit('statusUpdated', task); // opcional
+    res.json({ task });
   } catch (err) {
-    console.error('[tasks/status]', err);
-    res.status(500).json({ error: 'Error al actualizar estado' });
+    console.error('[update/status]', err);
+    res.status(500).json({ error: 'Error al actualizar el estado' });
   }
 });
+
+
 
 // Editar tarea (solo el creador)
 app.put('/tasks/:id', authMiddleware, async (req, res) => {
