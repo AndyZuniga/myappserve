@@ -873,6 +873,27 @@ app.delete('/tasks/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// Obtener una tarea por ID
+app.get('/tasks/:id', authMiddleware, async (req, res) => {
+  try {
+    const task = await Task.findById(req.params.id).populate('assignee', 'nombre apellido apodo');
+    if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
+
+    const userId = req.user.id;
+    if (
+      task.createdBy.toString() !== userId &&
+      task.assignee?.toString() !== userId
+    ) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    res.json(task);
+  } catch (err) {
+    console.error('[tasks/get]', err);
+    res.status(500).json({ error: 'Error al obtener tarea' });
+  }
+});
+
 
 
 // === Obtener solicitudes de amistad pendientes para un usuario ===
