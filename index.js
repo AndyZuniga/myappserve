@@ -758,8 +758,62 @@ app.get('/users/search', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Error interno en búsqueda' });
   }
 });
+// === Obtener solicitudes de amistad pendientes para un usuario ===
+// === Obtener solicitudes de amistad pendientes para un usuario ===
+
+// === Esquema de Tarea ===
+const taskSchema = new mongoose.Schema({
+  title:     { type: String, required: true },
+  dueDate:   { type: Date,   required: true },
+  assignee:  { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true }
+}, { timestamps: true });
+const Task = mongoose.model('task', taskSchema);
+
+// === Rutas de Tareas ===
+// Crear tarea
+app.post('/tasks', authMiddleware, async (req, res) => {
+  const { title, dueDate, assigneeId } = req.body;
+  if (!title || !dueDate) {
+    return res.status(400).json({ error: 'Título y fecha límite son obligatorios' });
+  }
+  try {
+    const task = new Task({
+      title,
+      dueDate: new Date(dueDate),
+      assignee: assigneeId || null,
+      createdBy: req.user.id
+    });
+    await task.save();
+    if (assigneeId) {
+      io.to(assigneeId.toString()).emit('newTask', task);
+    }
+    res.status(201).json(task);
+  } catch (err) {
+    console.error('[tasks/create]', err);
+    res.status(500).json({ error: 'Error interno al crear tarea' });
+  }
+});
+
+// Listar tareas del usuario (creadas o asignadas)
+app.get('/tasks', authMiddleware, async (req, res) => {
+  try {
+    const tasks = await Task.find({
+      $or: [
+        { createdBy: req.user.id },
+        { assignee:  req.user.id }
+      ]
+    }).populate('assignee', 'nombre apellido apodo');
+    res.json({ tasks });
+  } catch (err) {
+    console.error('[tasks/list]', err);
+    res.status(500).json({ error: 'Error interno al listar tareas' });
+  }
+});
 
 
+
+// === Obtener solicitudes de amistad pendientes para un usuario ===
 // === Obtener solicitudes de amistad pendientes para un usuario ===
 app.get('/friend-requests', authMiddleware, async (req, res) => {
   const { userId } = req.query;
