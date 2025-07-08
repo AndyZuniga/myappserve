@@ -763,33 +763,35 @@ app.get('/users/search', authMiddleware, async (req, res) => {
 
 // === Esquema de Tarea ===
 const taskSchema = new mongoose.Schema({
-  title:     { type: String, required: true },
-  dueDate:   { type: Date,   required: true },
-  assignee:  { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true }, // ← COMA AQUÍ
-  status:    { type: String, enum: ['pendiente', 'en progreso', 'completada'], default: 'pendiente' }
+  title:        { type: String, required: true },
+  description:  { type: String, default: '' },
+  dueDate:      { type: Date,   required: true },
+  importance:   { type: Number, min: 1, max: 10, default: 1 },
+  assignees:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'user' }],
+  createdBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true },
+  status:       { type: String, enum: ['no_realizada','incompleta','completada'], default: 'no_realizada' }
 }, { timestamps: true });
 const Task = mongoose.model('task', taskSchema);
 
 // === Rutas de Tareas ===
-
 // Crear tarea
 app.post('/tasks', authMiddleware, async (req, res) => {
-  const { title, dueDate, assigneeId } = req.body;
-  if (!title || !dueDate) {
-    return res.status(400).json({ error: 'Título y fecha límite son obligatorios' });
+  const { title, description, dueDate, importance, assigneeIds } = req.body;
+  if (!title || !dueDate || !importance) {
+    return res.status(400).json({ error: 'Título, fecha y nivel de importancia son obligatorios' });
   }
   try {
     const task = new Task({
       title,
+      description,
       dueDate: new Date(dueDate),
-      assignee: assigneeId || null,
+      importance,
+      assignees: Array.isArray(assigneeIds) ? assigneeIds : [],
       createdBy: req.user.id
     });
     await task.save();
-    if (assigneeId) {
-      io.to(assigneeId.toString()).emit('newTask', task);
-    }
+    // Notificar a todos los encargados
+    task.assignees.forEach(id => io.to(id.toString()).emit('newTask', task));
     res.status(201).json(task);
   } catch (err) {
     console.error('[tasks/create]', err);
@@ -801,12 +803,10 @@ app.post('/tasks', authMiddleware, async (req, res) => {
 app.get('/tasks', authMiddleware, async (req, res) => {
   try {
     const tasks = await Task.find({
-      $or: [
-        { createdBy: req.user.id },
-        { assignee:  req.user.id }
-      ]
-    }).populate('assignee', '_id nombre apellido apodo'); // <-- aquí
-
+      $or: [ { createdBy: req.user.id }, { assignees: req.user.id } ]
+    })
+    .populate('assignees', '_id nombre apellido apodo')
+    .exec();
     res.json({ tasks });
   } catch (err) {
     console.error('[tasks/list]', err);
@@ -814,48 +814,40 @@ app.get('/tasks', authMiddleware, async (req, res) => {
   }
 });
 
-// Actualizar estado (solo si es el encargado)
-app.patch('/tasks/:id/status', authMiddleware, async (req, res) => {
-  const { status } = req.body;
-  console.log('Status recibido:', status);
-
-  const validStatuses = ['no_realizada', 'incompleta', 'completada'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({ error: 'Estado inválido' });
-  }
-
+// Obtener tarea por ID
+app.get('/tasks/:id', authMiddleware, async (req, res) => {
   try {
-    const task = await Task.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true }
-    );
+    const task = await Task.findById(req.params.id)
+      .populate('assignees', 'nombre apellido apodo');
     if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
-
-    io.emit('statusUpdated', task); // opcional
-    res.json({ task });
+    const uid = req.user.id;
+    if (task.createdBy.toString() !== uid && !task.assignees.includes(uid)) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+    res.json(task);
   } catch (err) {
-    console.error('[update/status]', err);
-    res.status(500).json({ error: 'Error al actualizar el estado' });
+    console.error('[tasks/get]', err);
+    res.status(500).json({ error: 'Error al obtener tarea' });
   }
 });
 
-
-
-// Editar tarea (solo el creador)
+// Editar tarea (solo creador)
 app.put('/tasks/:id', authMiddleware, async (req, res) => {
-  const { title, dueDate, assigneeId } = req.body;
+  const { title, description, dueDate, importance, assigneeIds } = req.body;
   try {
     const task = await Task.findById(req.params.id);
     if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
     if (task.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'No autorizado para editar esta tarea' });
+      return res.status(403).json({ error: 'No autorizado' });
     }
     if (title) task.title = title;
+    if (description !== undefined) task.description = description;
     if (dueDate) task.dueDate = new Date(dueDate);
-    if (assigneeId !== undefined) task.assignee = assigneeId;
+    if (importance) task.importance = importance;
+    if (Array.isArray(assigneeIds)) task.assignees = assigneeIds;
     await task.save();
-    io.to(task.assignee?.toString()).emit('taskUpdated', task);
+    // Notificar cambios
+    task.assignees.forEach(id => io.to(id.toString()).emit('taskUpdated', task));
     res.json(task);
   } catch (err) {
     console.error('[tasks/edit]', err);
@@ -863,41 +855,43 @@ app.put('/tasks/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Eliminar tarea (solo el creador)
+// Actualizar estado (solo encargado)
+app.patch('/tasks/:id/status', authMiddleware, async (req, res) => {
+  const { status } = req.body;
+  const valid = ['no_realizada','incompleta','completada'];
+  if (!valid.includes(status)) {
+    return res.status(400).json({ error: 'Estado inválido' });
+  }
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
+    if (!task.assignees.includes(req.user.id)) {
+      return res.status(403).json({ error: 'Solo encargados pueden cambiar estado' });
+    }
+    task.status = status;
+    await task.save();
+    io.to(req.params.id).emit('statusUpdated', task);
+    res.json(task);
+  } catch (err) {
+    console.error('[tasks/status]', err);
+    res.status(500).json({ error: 'Error al actualizar estado' });
+  }
+});
+
+// Eliminar tarea (solo creador)
 app.delete('/tasks/:id', authMiddleware, async (req, res) => {
   try {
     const task = await Task.findById(req.params.id);
     if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
     if (task.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'No autorizado para eliminar esta tarea' });
+      return res.status(403).json({ error: 'No autorizado' });
     }
     await task.remove();
-    io.to(task.assignee?.toString()).emit('taskDeleted', { id: task._id });
+    task.assignees.forEach(id => io.to(id.toString()).emit('taskDeleted', { id: task._id }));
     res.json({ message: 'Tarea eliminada' });
   } catch (err) {
     console.error('[tasks/delete]', err);
     res.status(500).json({ error: 'Error al eliminar tarea' });
-  }
-});
-
-// Obtener una tarea por ID
-app.get('/tasks/:id', authMiddleware, async (req, res) => {
-  try {
-    const task = await Task.findById(req.params.id).populate('assignee', 'nombre apellido apodo');
-    if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
-
-    const userId = req.user.id;
-    if (
-      task.createdBy.toString() !== userId &&
-      task.assignee?.toString() !== userId
-    ) {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-
-    res.json(task);
-  } catch (err) {
-    console.error('[tasks/get]', err);
-    res.status(500).json({ error: 'Error al obtener tarea' });
   }
 });
 
