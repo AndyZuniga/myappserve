@@ -769,6 +769,7 @@ const taskSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user', required: true }, // ← COMA AQUÍ
   status:    { type: String, enum: ['pendiente', 'en progreso', 'completada'], default: 'pendiente' }
 }, { timestamps: true });
+const Task = mongoose.model('task', taskSchema);
 
 // === Rutas de Tareas ===
 
